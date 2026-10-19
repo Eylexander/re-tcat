@@ -184,9 +184,11 @@ class _LiveMapState extends State<LiveMap> with SingleTickerProviderStateMixin {
               for (final s in gtfs.stations.values)
                 Marker(
                   point: LatLng(s.lat, s.lon),
-                  width: 28,
-                  height: 28,
+                  width: 36,
+                  height: 36,
+                  // Opaque: the whole marker takes the tap, not only the 10 px dot.
                   child: GestureDetector(
+                    behavior: HitTestBehavior.opaque,
                     onTap: () => openStop(context, s.id),
                     child: Center(
                       child: _Dot(size: 10, color: cs.onSurfaceVariant, label: s.name),
@@ -200,9 +202,10 @@ class _LiveMapState extends State<LiveMap> with SingleTickerProviderStateMixin {
             for (final s in widget.highlightStops)
               Marker(
                 point: LatLng(s.lat, s.lon),
-                width: 28,
-                height: 28,
+                width: 36,
+                height: 36,
                 child: GestureDetector(
+                  behavior: HitTestBehavior.opaque,
                   onTap: () => openStop(context, s.station),
                   child: Center(
                     child: _Dot(size: 13, color: widget.shapeColor ?? cs.primary, label: s.name),
