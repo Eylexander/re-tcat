@@ -26,9 +26,10 @@ flutter build apk --release --target-platform android-arm64 # → build/app/outp
   macOS that builds the app unsigned (`--no-codesign`), checks the widget extension is embedded, and attaches
   `re-tcat-vX-unsigned.ipa` for sideloading.
 - Release key: `.secrets/release.p12` + `.secrets/password.txt` (git-ignored), or `RELEASE_KEYSTORE` /
-  `RELEASE_KEYSTORE_PASS` in CI (secrets `RELEASE_KEYSTORE_BASE64` / `RELEASE_KEYSTORE_PASS`). v1.0.0 was signed
-  with SHA-256 `db171ead…` (Audio Cutter's key, the CI secret). **Not** `../LLLearner/.secrets/`: that one is
-  `849a758d…`, and phones refuse it as an update. **Never regenerate or lose it.** Debug builds are
+  `RELEASE_KEYSTORE_PASS` in CI (secrets `RELEASE_KEYSTORE_BASE64` / `RELEASE_KEYSTORE_PASS`). SHA-256 `db171ead…`,
+  shared with LLLearner and Audio Cutter. `.secrets/` is git-ignored, so a fresh clone has none: copy it over from
+  another PC, never take another project's `.secrets` on faith (check `fingerprint.txt`), and never regenerate or
+  lose it. Phones refuse an update signed with another key. Debug builds are
   `com.eylexander.retcat.debug` ("Re-TCAT (dev)").
 - `android/app/proguard-rules.pro` keeps what shared_preferences_android 2.5.0 looks up through JNI: without it, R8
   renames it and release builds hang on the splash screen (debug builds are fine). Check a release build after
