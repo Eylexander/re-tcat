@@ -26,9 +26,13 @@ flutter build apk --release --target-platform android-arm64 # → build/app/outp
   macOS that builds the app unsigned (`--no-codesign`), checks the widget extension is embedded, and attaches
   `re-tcat-vX-unsigned.ipa` for sideloading.
 - Release key: `.secrets/release.p12` + `.secrets/password.txt` (git-ignored), or `RELEASE_KEYSTORE` /
-  `RELEASE_KEYSTORE_PASS` in CI (secrets `RELEASE_KEYSTORE_BASE64` / `RELEASE_KEYSTORE_PASS`). Same key as LLLearner
-  (`../LLLearner/.secrets/`, SHA-256 `db171ead…`). **Never regenerate or lose it.** Debug builds are
+  `RELEASE_KEYSTORE_PASS` in CI (secrets `RELEASE_KEYSTORE_BASE64` / `RELEASE_KEYSTORE_PASS`). v1.0.0 was signed
+  with SHA-256 `db171ead…` (Audio Cutter's key, the CI secret). **Not** `../LLLearner/.secrets/`: that one is
+  `849a758d…`, and phones refuse it as an update. **Never regenerate or lose it.** Debug builds are
   `com.eylexander.retcat.debug` ("Re-TCAT (dev)").
+- `android/app/proguard-rules.pro` keeps what shared_preferences_android 2.5.0 looks up through JNI: without it, R8
+  renames it and release builds hang on the splash screen (debug builds are fine). Check a release build after
+  upgrading plugins that use Pigeon JNI / jnigen.
 - The launcher icon is an adaptive vector only (`res/drawable/ic_launcher_*.xml`), hence `minSdk = 26`.
   `tool/icon.svg` has the same paths and the commands for the iOS and F-Droid PNGs.
 - geolocator bundles the Play services location client (`NonFreeDep` in the listing). It is never called:
@@ -53,6 +57,8 @@ flutter build apk --release --target-platform android-arm64 # → build/app/outp
   - Trip updates have no `start_date`: an update only applies to the run of the trip within ±3 h (`_rtMatch`).
     `TripUpdate.delayAt` follows ha-tcat's `live_delay`: own time or delay, else the closest earlier stop's delay,
     `gone` when canceled, skipped (TCAT marks detoured stops), or when the update only lists later stops (passed).
+  - Before a trip starts, its update gives many stops the feed's timestamp: a time shared by several stops of an
+    update is ignored (`_placeholders`), or departures read "à l'arrêt, -14 min". ha-tcat doesn't have this rule yet.
   - Live updates sometimes list extra stops with `stop_sequence = 0` (detours): they match no GTFS stop and are ignored.
 
 ## Architecture
