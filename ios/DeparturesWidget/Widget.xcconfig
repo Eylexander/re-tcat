@@ -1,0 +1,3 @@
+// The widget gets the version from Flutter (FLUTTER_BUILD_NAME / NUMBER), like the app, but not the app's
+// CocoaPods settings (Flutter/Release.xcconfig may include them).
+#include "../Flutter/Generated.xcconfig"

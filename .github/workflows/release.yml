@@ -1,0 +1,69 @@
+name: Release
+
+# Push a tag like v1.2.0 to build the APK and the iOS app and publish them as a GitHub release; the F-Droid repo
+# (Eylexander/fdroid) picks the APK up. "Run workflow" on the Actions tab builds both without publishing (they are
+# attached to the run). The Android build is shared with the other apps of the F-Droid repo:
+# Eylexander/fdroid/.github/workflows/flutter-apk.yml. Keep this file's name: the versionCode is its run number.
+on:
+  push:
+    tags: ["v*"]
+  workflow_dispatch:
+
+permissions:
+  contents: write
+
+jobs:
+  android:
+    uses: Eylexander/fdroid/.github/workflows/flutter-apk.yml@main
+    with:
+      apk-name: re-tcat
+      flutter-version: "3.47.7"
+    secrets:
+      RELEASE_KEYSTORE_BASE64: ${{ secrets.RELEASE_KEYSTORE_BASE64 }}
+      RELEASE_KEYSTORE_PASS: ${{ secrets.RELEASE_KEYSTORE_PASS }}
+
+  # No Apple certificate: proves the app and its widget compile for iOS, and gives an ad-hoc signed .ipa that a
+  # sideloading tool (`xtool install`, AltStore, SideStore, Sideloadly) re-signs with the user's Apple ID.
+  ios:
+    runs-on: macos-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: subosito/flutter-action@v2
+        with:
+          flutter-version: "3.47.7"
+          channel: stable
+          cache: true
+
+      - run: flutter pub get
+
+      - name: Build
+        run: |
+          if [ "$GITHUB_REF_TYPE" = "tag" ]; then
+            flutter build ios --release --no-codesign --build-name "${GITHUB_REF_NAME#v}" --build-number "$GITHUB_RUN_NUMBER"
+          else
+            flutter build ios --release --no-codesign --build-number "$GITHUB_RUN_NUMBER"
+          fi
+          mkdir -p dist/Payload
+          cp -R build/ios/iphoneos/Runner.app dist/Payload/
+          app=dist/Payload/Runner.app
+          test -d "$app/PlugIns/DeparturesWidget.appex"
+          # Ad-hoc signature carrying the entitlements: re-signing tools (xtool, AltStore) read the App Group from
+          # it, and without it the widget gets no shared data. Inside out: frameworks, widget, app.
+          for f in "$app"/Frameworks/*; do codesign --force --sign - "$f"; done
+          codesign --force --sign - --entitlements ios/DeparturesWidget/DeparturesWidget.entitlements \
+            "$app/PlugIns/DeparturesWidget.appex"
+          codesign --force --sign - --entitlements ios/Runner/Runner.entitlements "$app"
+          codesign -d --entitlements - "$app" | grep -q application-groups
+          (cd dist && zip -qr "re-tcat-${GITHUB_REF_NAME//\//-}-unsigned.ipa" Payload)
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: re-tcat-ipa
+          path: dist/*.ipa
+
+      - name: Publish release
+        if: github.ref_type == 'tag'
+        uses: softprops/action-gh-release@v2
+        with:
+          files: dist/*.ipa

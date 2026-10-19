@@ -1,0 +1,9 @@
+<!-- Store and iOS icon, same paths as android/app/src/main/res/drawable/ic_launcher_*.xml (108-unit adaptive canvas).
+     iOS (no alpha allowed): rsvg-convert -w 1024 tool/icon.svg | magick - -alpha off ios/Runner/Assets.xcassets/AppIcon.appiconset/icon-1024.png
+     F-Droid listing:        rsvg-convert -w 512 tool/icon.svg -o ../fdroid/metadata/com.eylexander.retcat/en-US/images/icon.png -->
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 108 108">
+  <rect width="108" height="108" fill="#1F6FB2"/>
+  <path fill="none" stroke="#FFFFFF" stroke-width="4" stroke-linejoin="round" stroke-linecap="round"
+    d="M42,29 H66 A8,8 0 0 1 74,37 V69 A4,4 0 0 1 70,73 H38 A4,4 0 0 1 34,69 V37 A8,8 0 0 1 42,29 Z M34,54 H74 M47,35 H61 M40,73 V79 M68,73 V79"/>
+  <path fill="#FFFFFF" d="M40,63.5 a3,3 0 1,0 6,0 a3,3 0 1,0 -6,0 Z M62,63.5 a3,3 0 1,0 6,0 a3,3 0 1,0 -6,0 Z"/>
+</svg>

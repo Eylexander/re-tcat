@@ -1,0 +1,8 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!-- Widget colors, light. Android 12+ uses the wallpaper colors (values-v31). -->
+<resources>
+    <color name="widget_bg">#FFF7F9FF</color>
+    <color name="widget_fg">#FF181C20</color>
+    <color name="widget_fg2">#FF42474E</color>
+    <color name="widget_accent">#FF1F6FB2</color>
+</resources>
