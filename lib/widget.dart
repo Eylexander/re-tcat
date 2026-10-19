@@ -119,7 +119,9 @@ Future<void> updateHomeWidget(Gtfs gtfs, Map<String, TripUpdate> live, String db
   final times = <int>{};
   await HomeWidget.saveWidgetData('dbPath', dbPath);
   if (Platform.isIOS && favorites != null) await _saveCatalog(gtfs, favorites);
-  for (final pick in await _picksInUse()) {
+  final picks = await _picksInUse();
+  if (picks.isEmpty) return; // no widget set up: nothing to draw
+  for (final pick in picks) {
     if (pick.split('|') case [final station, final route, final dir]) {
       // A stop gone from a new timetable still gets (empty) data: Android widgets ask again while theirs is missing.
       final s = gtfs.stations[station];

@@ -89,7 +89,12 @@ class Store extends ChangeNotifier {
   }
 
   /// Downloads the timetable if there is none, or if TCAT published a new one (checked every 6 hours, as ha-tcat).
-  Future<void> checkTimetable({bool force = false}) async {
+  /// One at a time: two imports would write the same `gtfs.db.tmp`.
+  Future<void> checkTimetable({bool force = false}) =>
+      _check ??= _checkTimetable(force).whenComplete(() => _check = null);
+  Future<void>? _check;
+
+  Future<void> _checkTimetable(bool force) async {
     final now = DateTime.now().millisecondsSinceEpoch ~/ 1000;
     if (!force && gtfs != null && now - _lastGtfsCheck < 6 * 3600) return;
     _lastGtfsCheck = now;

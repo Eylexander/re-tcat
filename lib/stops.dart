@@ -29,14 +29,21 @@ class StopsTab extends StatefulWidget {
 class _StopsTabState extends State<StopsTab> {
   final _search = TextEditingController();
   LatLng? _me;
+  List<Station> _near = const [];
   bool _locating = false;
+
+  /// The 10 stations nearest to [p], sorted once per location instead of at every poll.
+  List<Station> _nearest(LatLng p) {
+    const distance = Distance();
+    final d = {for (final s in store.gtfs!.stations.values) s: distance(p, LatLng(s.lat, s.lon))};
+    return (d.keys.toList()..sort((a, b) => d[a]!.compareTo(d[b]!))).take(10).toList();
+  }
 
   @override
   Widget build(BuildContext context) {
     final gtfs = store.gtfs!;
     final q = fold(_search.text.trim());
     final t = Theme.of(context).textTheme;
-    const distance = Distance();
 
     return SafeArea(
       child: CustomScrollView(
@@ -90,6 +97,7 @@ class _StopsTabState extends State<StopsTab> {
                             if (mounted) {
                               setState(() {
                                 _me = p;
+                                _near = p == null ? const [] : _nearest(p);
                                 _locating = false;
                               });
                             }
@@ -102,17 +110,7 @@ class _StopsTabState extends State<StopsTab> {
                 ),
               )
             else
-              SliverList.list(
-                children: [
-                  for (final s
-                      in (gtfs.stations.values.toList()..sort(
-                            (a, b) =>
-                                distance(_me!, LatLng(a.lat, a.lon)).compareTo(distance(_me!, LatLng(b.lat, b.lon))),
-                          ))
-                          .take(10))
-                    _StationTile(s, me: _me),
-                ],
-              ),
+              SliverList.list(children: [for (final s in _near) _StationTile(s, me: _me)]),
             if (store.favorites.isEmpty)
               SliverToBoxAdapter(
                 child: Padding(

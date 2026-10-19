@@ -221,8 +221,9 @@ class Gtfs {
     return out.take(count).toList();
   }
 
-  /// Distinct shapes of a line, as [lat, lon] lists.
-  List<List<(double, double)>> lineShapes(String route) => [
+  /// Distinct shapes of a line, as [lat, lon] lists. Cached: the map asks again at every poll.
+  final _lineShapes = <String, List<List<(double, double)>>>{};
+  List<List<(double, double)>> lineShapes(String route) => _lineShapes[route] ??= [
     for (final s in db.select('SELECT DISTINCT shape FROM trips WHERE route = ? AND shape != ?', [route, '']))
       shape(s['shape']),
   ];
@@ -242,8 +243,7 @@ class Gtfs {
     );
     final seen = <String>{};
     for (final r in longest) {
-      final key = r['dir'] == '' ? r['terminus'] : r['dir'];
-      if (seen.add(key)) out.add((terminus: r['terminus'], stops: tripStops(r['id'])));
+      if (seen.add(dirKey(r['dir'], r['terminus']))) out.add((terminus: r['terminus'], stops: tripStops(r['id'])));
     }
     return out;
   }
@@ -266,8 +266,9 @@ class Gtfs {
       (station: r['station'], route: r['route'], dir: dirKey(r['dir'], r['terminus']), terminus: r['terminus']),
   ];
 
-  /// Lines serving a station.
-  List<Line> stationRoutes(String station) => [
+  /// Lines serving a station. Cached: a join over stop_times, asked by every stop tile at each poll and keystroke.
+  final _stationRoutes = <String, List<Line>>{};
+  List<Line> stationRoutes(String station) => _stationRoutes[station] ??= [
     for (final r in db.select(
       'SELECT DISTINCT t.route FROM stop_times st JOIN stops s ON s.id = st.stop JOIN trips t ON t.id = st.trip '
       'JOIN routes r ON r.id = t.route WHERE s.station = ? AND st.last = 0 ORDER BY r.sort',
@@ -325,12 +326,13 @@ void importGtfs(Uint8List zip, String path, String source) {
     BEGIN;
   ''');
 
-  int color(String? hex, int fallback) => int.tryParse(hex ?? '', radix: 16)?.let((c) => 0xFF000000 | c) ?? fallback;
-  final routeIds = <String>{};
-  final routeRows = rows('routes.txt').where((r) => r['agency_id'] != _hiddenAgency).toList();
-  for (final r in routeRows) {
-    routeIds.add(r['route_id']!);
+  int color(String? hex, int fallback) {
+    final c = int.tryParse(hex ?? '', radix: 16);
+    return c == null ? fallback : 0xFF000000 | c;
   }
+
+  final routeRows = rows('routes.txt').where((r) => r['agency_id'] != _hiddenAgency).toList();
+  final routeIds = {for (final r in routeRows) r['route_id']!};
 
   final trips = [
     for (final t in rows('trips.txt'))
@@ -460,10 +462,6 @@ void importGtfs(Uint8List zip, String path, String source) {
   ''');
   db.close();
   File(tmp).renameSync(path);
-}
-
-extension<T> on T {
-  R let<R>(R Function(T) f) => f(this);
 }
 
 int _secs(String hms) {
