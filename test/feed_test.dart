@@ -147,6 +147,26 @@ void main() {
     expect(deps.map((d) => (d.trip, d.terminus, d.delay)), [('T1', 'BARBEREY', 120)]);
     expect(deps.single.time, Gtfs.base(now) + t + 600 + 120);
     expect(g.departures('0:C1', now, {}).map((d) => d.trip), ['T2']);
+    // A widget following line 3 toward BARBEREY (direction_id 0) at HOCHE.
+    expect(groupDirections(g.stationDirections()), {
+      '1:A': {
+        '3': {
+          '0': ['BARBEREY'],
+        },
+      },
+      '0:B1': {
+        '3': {
+          '0': ['BARBEREY'],
+        },
+      },
+      '0:C1': {
+        '3': {
+          '1': ['HOCHE'],
+        },
+      },
+    });
+    expect(g.departures('1:A', now, {}, onlyRoutes: {'3'}, direction: '0').map((d) => d.trip), ['T1']);
+    expect(g.departures('1:A', now, {}, direction: '1'), isEmpty);
     expect(g.lineStops('3').map((d) => d.terminus), ['BARBEREY', 'HOCHE']);
     expect(g.shape('SH'), hasLength(2));
   });

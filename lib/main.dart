@@ -1,4 +1,5 @@
 import 'dart:async';
+import 'dart:io';
 
 import 'package:dynamic_color/dynamic_color.dart';
 import 'package:flutter/material.dart';
@@ -7,6 +8,7 @@ import 'package:home_widget/home_widget.dart';
 
 import 'lines.dart';
 import 'map.dart';
+import 'setup.dart';
 import 'stops.dart';
 import 'store.dart';
 import 'theme.dart';
@@ -18,12 +20,15 @@ final navigator = GlobalKey<NavigatorState>();
 Future<void> main() async {
   WidgetsFlutterBinding.ensureInitialized();
   await setupHomeWidget();
+  // Opened by WidgetConfigActivity: a widget being added, or set up again.
+  final setup = Platform.isAndroid ? await HomeWidget.initiallyLaunchedFromHomeWidgetConfigure() : null;
   await store.init();
-  runApp(const App());
+  runApp(App(home: setup == null ? const Shell() : WidgetSetup(int.parse(setup))));
 }
 
 class App extends StatelessWidget {
-  const App({super.key});
+  const App({super.key, required this.home});
+  final Widget home;
 
   @override
   Widget build(BuildContext context) => DynamicColorBuilder(
@@ -36,7 +41,7 @@ class App extends StatelessWidget {
       locale: const Locale('fr'),
       supportedLocales: const [Locale('fr')],
       localizationsDelegates: GlobalMaterialLocalizations.delegates,
-      home: const Shell(),
+      home: home,
     ),
   );
 }

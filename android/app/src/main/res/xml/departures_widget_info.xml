@@ -1,5 +1,6 @@
 <?xml version="1.0" encoding="utf-8"?>
-<!-- updatePeriodMillis: a redraw every 30 min (the minimum), which refreshes the live times when they are stale. -->
+<!-- configure: each widget asks for its stop when added (lib/setup.dart); reconfigurable: again on long press.
+     updatePeriodMillis: a redraw every 30 min (the minimum), which refreshes the live times when they are stale. -->
 <appwidget-provider xmlns:android="http://schemas.android.com/apk/res/android"
     android:description="@string/widget_description"
     android:initialLayout="@layout/departures_widget"
@@ -11,4 +12,6 @@
     android:targetCellHeight="2"
     android:resizeMode="horizontal|vertical"
     android:updatePeriodMillis="1800000"
+    android:configure="com.eylexander.retcat.WidgetConfigActivity"
+    android:widgetFeatures="reconfigurable"
     android:widgetCategory="home_screen" />

@@ -1,13 +1,9 @@
-import 'dart:io';
-
 import 'package:flutter/material.dart';
-import 'package:home_widget/home_widget.dart';
 import 'package:latlong2/latlong.dart';
 
 import 'gtfs.dart';
 import 'map.dart';
 import 'store.dart';
-import 'widget.dart';
 import 'widgets.dart';
 
 void openStop(BuildContext context, String station) =>
@@ -122,8 +118,8 @@ class _StopsTabState extends State<StopsTab> {
                 child: Padding(
                   padding: const EdgeInsets.all(24),
                   child: Text(
-                    'Ajoutez vos arrêts en favori (☆) pour voir leurs prochains bus ici, et en afficher un sur l\'écran '
-                    'd\'accueil avec le widget.',
+                    'Ajoutez vos arrêts en favori (☆) pour voir leurs prochains bus ici. Sur l\'écran d\'accueil, '
+                    'les widgets Re-TCAT demandent leur arrêt, et au besoin la ligne et le sens.',
                     style: t.bodyMedium?.copyWith(color: Theme.of(context).colorScheme.onSurfaceVariant),
                     textAlign: TextAlign.center,
                   ),
@@ -184,7 +180,6 @@ class _FavoriteCard extends StatelessWidget {
             ListTile(
               onTap: () => openStop(context, s.id),
               title: Text(s.name, style: const TextStyle(fontWeight: FontWeight.w700)),
-              trailing: store.widgetStation == s.id ? const Icon(Icons.widgets_outlined, size: 18) : null,
             ),
             if (deps.isEmpty)
               const Padding(padding: EdgeInsets.fromLTRB(20, 0, 20, 16), child: Text('Pas de bus dans les 4 heures'))
@@ -232,17 +227,6 @@ class _StopPageState extends State<StopPage> {
               tooltip: fav ? 'Retirer des favoris' : 'Ajouter aux favoris',
               onPressed: () => store.toggleFavorite(s.id),
               icon: Icon(fav ? Icons.star : Icons.star_border),
-            ),
-            PopupMenuButton(
-              itemBuilder: (_) => [
-                PopupMenuItem(
-                  onTap: () => _pinWidget(context, s),
-                  child: ListTile(
-                    leading: const Icon(Icons.widgets_outlined),
-                    title: Text(store.widgetStation == s.id ? 'Retirer du widget' : 'Afficher sur le widget'),
-                  ),
-                ),
-              ],
             ),
           ],
         ),
@@ -292,26 +276,4 @@ class _StopPageState extends State<StopPage> {
       );
     },
   );
-
-  Future<void> _pinWidget(BuildContext context, Station s) async {
-    final remove = store.widgetStation == s.id;
-    await store.setWidgetStation(remove ? null : s.id);
-    if (remove || !context.mounted) return;
-    // Android launchers can add the widget from here, if it isn't on the home screen yet; elsewhere, say how.
-    if (Platform.isAndroid &&
-        (await HomeWidget.getInstalledWidgets()).isEmpty &&
-        (await HomeWidget.isRequestPinWidgetSupported() ?? false)) {
-      await HomeWidget.requestPinWidget(qualifiedAndroidName: androidWidget);
-    } else if (context.mounted) {
-      ScaffoldMessenger.of(context).showSnackBar(
-        SnackBar(
-          content: Text(
-            Platform.isIOS
-                ? '${s.name} s\'affichera dans le widget Re-TCAT : appui long sur l\'écran d\'accueil → +'
-                : '${s.name} s\'affichera dans le widget Re-TCAT',
-          ),
-        ),
-      );
-    }
-  }
 }

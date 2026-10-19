@@ -31,12 +31,44 @@
             </intent-filter>
         </activity>
 
+        <!-- A widget's setup (lib/setup.dart), opened by the launcher when a widget is added. -->
+        <activity
+            android:name=".WidgetConfigActivity"
+            android:exported="true"
+            android:excludeFromRecents="true"
+            android:taskAffinity=""
+            android:theme="@style/LaunchTheme"
+            android:configChanges="orientation|keyboardHidden|keyboard|screenSize|smallestScreenSize|locale|layoutDirection|fontScale|screenLayout|density|uiMode"
+            android:hardwareAccelerated="true"
+            android:windowSoftInputMode="adjustResize">
+            <meta-data
+              android:name="io.flutter.embedding.android.NormalTheme"
+              android:resource="@style/NormalTheme"
+              />
+            <intent-filter>
+                <action android:name="android.appwidget.action.APPWIDGET_CONFIGURE"/>
+            </intent-filter>
+        </activity>
+
         <!-- Home screen widget: next buses at one stop (DeparturesWidget.kt, lib/widget.dart). -->
         <receiver android:name=".DeparturesWidget" android:exported="true" android:label="Prochains bus">
             <intent-filter>
                 <action android:name="android.appwidget.action.APPWIDGET_UPDATE"/>
             </intent-filter>
             <meta-data android:name="android.appwidget.provider" android:resource="@xml/departures_widget_info"/>
+        </receiver>
+        <!-- The next bus at one stop, or at two. -->
+        <receiver android:name=".NextBusWidget" android:exported="true" android:label="Prochain bus">
+            <intent-filter>
+                <action android:name="android.appwidget.action.APPWIDGET_UPDATE"/>
+            </intent-filter>
+            <meta-data android:name="android.appwidget.provider" android:resource="@xml/next_bus_widget_info"/>
+        </receiver>
+        <receiver android:name=".NextBus2Widget" android:exported="true" android:label="Prochain bus · 2 arrêts">
+            <intent-filter>
+                <action android:name="android.appwidget.action.APPWIDGET_UPDATE"/>
+            </intent-filter>
+            <meta-data android:name="android.appwidget.provider" android:resource="@xml/next_bus2_widget_info"/>
         </receiver>
         <!-- The widget's refresh, run in Dart (widgetCallback). -->
         <receiver android:name="es.antonborri.home_widget.HomeWidgetBackgroundReceiver" android:exported="true">

@@ -21,7 +21,8 @@ no ads, no trackers. The app itself is in French.
 - **Stops**: search by name, find stops around you, and keep favorites with their next buses (live when the bus
   reports its position, scheduled otherwise).
 - **Lines**: route, stops in each direction, buses in service, service alerts.
-- **Widget**: the next buses at a stop on your home screen (Android and iOS).
+- **Widgets**: the next buses at a stop, or just the next bus at one or two stops, on your home screen (Android and
+  iOS 17+). Each widget asks for its stop, and optionally a line and its direction, for your daily trip.
 
 ## Install
 

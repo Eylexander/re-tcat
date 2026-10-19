@@ -29,7 +29,6 @@ class Store extends ChangeNotifier {
   bool offline = false;
 
   List<String> favorites = [];
-  String? widgetStation;
 
   Timer? _timer;
   int _lastGtfsCheck = 0, _lastAlerts = 0;
@@ -38,7 +37,10 @@ class Store extends ChangeNotifier {
   Future<void> init() async {
     _prefs = await SharedPreferences.getInstance();
     favorites = _prefs.getStringList('favorites') ?? [];
-    widgetStation = _prefs.getString('widgetStation');
+    if (_prefs.getString('widgetStation') case final station?) {
+      await migrateWidgetStation(station);
+      await _prefs.remove('widgetStation');
+    }
     dbPath = '${(await getApplicationSupportDirectory()).path}/gtfs.db';
     try {
       gtfs = Gtfs.open(dbPath);
@@ -76,7 +78,7 @@ class Store extends ChangeNotifier {
       }
       liveTime = now;
       offline = false;
-      if (gtfs != null && widgetStation != null) await updateHomeWidget(gtfs!, widgetStation!, live, dbPath);
+      if (gtfs != null) await updateHomeWidget(gtfs!, live, dbPath, favorites: favorites);
     } catch (e) {
       debugPrint('realtime: $e');
       offline = true;
@@ -116,13 +118,6 @@ class Store extends ChangeNotifier {
     isFavorite(station) ? favorites.remove(station) : favorites.add(station);
     _prefs.setStringList('favorites', favorites);
     notifyListeners();
-  }
-
-  Future<void> setWidgetStation(String? station) async {
-    widgetStation = station;
-    station == null ? await _prefs.remove('widgetStation') : await _prefs.setString('widgetStation', station);
-    notifyListeners();
-    if (gtfs != null) await updateHomeWidget(gtfs!, station, live, dbPath);
   }
 
   Vehicle? vehicleOnTrip(String trip) => vehicles.where((v) => v.trip == trip).firstOrNull;

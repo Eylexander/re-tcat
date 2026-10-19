@@ -73,16 +73,25 @@ flutter build apk --release --target-platform android-arm64 # → build/app/outp
   position, kept above the bottom sheet (`padding`). A drag stops following. Stations show from zoom 15.
   - Tabs: Carte (all buses, line filter chips), Arrêts (search, favorites with next buses, nearby), Lignes (running
     lines first, then all, then on-demand). `FollowPage` = map + the trip's stops timeline with live times.
-- **Widget** (`lib/widget.dart`): the app writes the next 8 departures of `store.widgetStation` as JSON (format in the
-  file's doc comment) at every poll; native widgets only draw it.
-  - Android: `DeparturesWidget.kt` (RemoteViews, rows added per available height). The app schedules a redraw at each
-    departure (`scheduleWidgetUpdates`, `HomeWidgetScheduledUpdateReceiver`) so buses that left drop off; a redraw of
-    data older than 10 min, or the refresh button, runs `widgetCallback` in a background Dart isolate (fetches the trip
-    updates, recomputes from `gtfs.db`). Use `qualifiedAndroidName` (debug builds have another package).
-  - iOS: `ios/DeparturesWidget/` (WidgetKit extension, App Group `group.com.eylexander.retcat`, timeline entry at each
-    departure). It has no live refresh while the app is closed. The extension target was added to
-    `Runner.xcodeproj` with the `xcodeproj` gem; it uses `DeparturesWidget/Widget.xcconfig` (Flutter's version numbers
-    without CocoaPods settings) and its embed phase must stay before "Thin Binary".
+- **Widgets** (`lib/widget.dart`, format in its doc comment): "Prochains bus" (list), "Prochain bus" (next bus, 2×1)
+  and "Prochain bus · 2 arrêts". Each widget asks for its stops when added: a stop, optionally one line and one
+  direction (`direction_id`, else terminus: `Gtfs.dirKey`), stored as a pick `station|route|dir`. At every poll the
+  app writes each pick in use's next 8 departures to `dep_<pick>`; native widgets only draw it. Kinds / provider
+  classes: `widgetNames`. A stop chosen in the app (old `widgetStation` pref) is migrated to the Android widgets.
+  - Android: providers in `DeparturesWidget.kt` (RemoteViews, rows added per available height); `config_<id>` holds a
+    widget's picks. `WidgetConfigActivity` (`android:configure`, reconfigurable) runs the app's Dart, which shows
+    `lib/setup.dart` for the configure intent; a widget without picks opens it when tapped. The app schedules a
+    redraw at each departure (`scheduleWidgetUpdates`, `HomeWidgetScheduledUpdateReceiver`) so buses that left drop
+    off; a redraw of data older than 10 min or missing, or the refresh button, runs `widgetCallback` in a background
+    Dart isolate (fetches the trip updates, recomputes from `gtfs.db`). Use `qualifiedAndroidName` (debug builds
+    have another package).
+  - iOS: `ios/DeparturesWidget/` (WidgetKit extension, one `WidgetBundle`, deployment target 17 for
+    `AppIntentConfiguration`; the app stays at 15). Settings pick from `picks`, which the app writes; the app can't
+    read the settings, so the widget notes its picks in `seen` and the app serves them from its next poll. App Group
+    `group.com.eylexander.retcat`, timeline entry at each departure, no live refresh while the app is closed. Never
+    compiled locally: check it with "Run workflow" (CI). The extension target was added to `Runner.xcodeproj` with
+    the `xcodeproj` gem; it uses `DeparturesWidget/Widget.xcconfig` (Flutter's version numbers without CocoaPods
+    settings) and its embed phase must stay before "Thin Binary".
   - App Group: re-signing tools rename it (xtool: `group.XTL-<id>.…`), so the app (`iosAppGroup`) and the widget read
     the real one from their `embedded.mobileprovision`. CI ad-hoc signs the `.ipa` with the entitlements because
     xtool takes them from the existing signature. xtool strips App Groups on free Apple IDs (`isFree: false` in its

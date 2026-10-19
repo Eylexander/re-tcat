@@ -21,7 +21,9 @@ compte, sans publicité, sans traqueur.
 - **Arrêts** : recherche, arrêts autour de vous, favoris avec leurs prochains bus (en direct quand le bus est suivi,
   horaire théorique sinon).
 - **Lignes** : tracé, arrêts dans chaque sens, bus en service, perturbations.
-- **Widget** : les prochains bus d'un arrêt sur l'écran d'accueil (Android et iOS).
+- **Widgets** : les prochains bus d'un arrêt, ou seulement le prochain bus à un ou deux arrêts, sur l'écran d'accueil
+  (Android et iOS 17+). Chaque widget demande son arrêt, et au besoin la ligne et le sens : votre trajet de tous les
+  jours.
 
 ## Installation
 

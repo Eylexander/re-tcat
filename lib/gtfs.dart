@@ -163,7 +163,11 @@ class Gtfs {
     return bases.firstOrNull;
   }
 
-  /// The next [count] buses leaving [station] (any of its stops), within [hours], with live delays from [live].
+  /// A line's direction: GTFS's direction_id, else the terminus.
+  static String dirKey(String dir, String terminus) => dir.isEmpty ? terminus : dir;
+
+  /// The next [count] buses leaving [station] (any of its stops), within [hours], with live delays from [live];
+  /// only those of [onlyRoutes], and of [direction] ([dirKey]) when given.
   /// A bus that is canceled, skips the stop or has already passed it is left out.
   List<Departure> departures(
     String station,
@@ -172,6 +176,7 @@ class Gtfs {
     int count = 20,
     int hours = 4,
     Set<String>? onlyRoutes,
+    String? direction,
   }) {
     final t = now.millisecondsSinceEpoch ~/ 1000;
     final out = <Departure>[];
@@ -180,7 +185,7 @@ class Gtfs {
       final day = DateTime(now.year, now.month, now.day + offset);
       final b = base(day), services = this.services(day);
       final rows = db.select(
-        'SELECT st.trip, st.seq, st.secs, t.route, t.service, t.terminus FROM stop_times st '
+        'SELECT st.trip, st.seq, st.secs, t.route, t.service, t.dir, t.terminus FROM stop_times st '
         'JOIN stops s ON s.id = st.stop JOIN trips t ON t.id = st.trip '
         'WHERE s.station = ? AND st.last = 0 AND st.secs BETWEEN ? AND ?',
         [station, t - b - _rtMatch, t - b + hours * 3600],
@@ -189,6 +194,7 @@ class Gtfs {
         if (!services.contains(r['service'])) continue;
         final route = routes[r['route']];
         if (route == null || (onlyRoutes != null && !onlyRoutes.contains(route.id))) continue;
+        if (direction != null && dirKey(r['dir'], r['terminus']) != direction) continue;
         final planned = b + (r['secs'] as int);
         int? delay;
         final u = live[r['trip']];
@@ -248,6 +254,17 @@ class Gtfs {
   Set<String> stopIds(String station) => {
     for (final r in db.select('SELECT id FROM stops WHERE station = ?', [station])) r['id'] as String,
   };
+
+  /// The buses leaving [station] (every station when null): line, direction ([dirKey]) and terminus.
+  List<({String station, String route, String dir, String terminus})> stationDirections([String? station]) => [
+    for (final r in db.select(
+      'SELECT DISTINCT s.station, t.route, t.dir, t.terminus FROM stop_times st JOIN stops s ON s.id = st.stop '
+      'JOIN trips t ON t.id = st.trip WHERE st.last = 0 ${station == null ? '' : 'AND s.station = ?'} '
+      'ORDER BY t.terminus',
+      [?station],
+    ))
+      (station: r['station'], route: r['route'], dir: dirKey(r['dir'], r['terminus']), terminus: r['terminus']),
+  ];
 
   /// Lines serving a station.
   List<Line> stationRoutes(String station) => [
