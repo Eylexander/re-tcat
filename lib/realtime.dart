@@ -138,6 +138,16 @@ class TripUpdate {
   final int? delay;
   final List<StopUpdate> stops;
 
+  /// Before a trip starts, TCAT gives many of its stops the feed's timestamp as their time: a time shared by several
+  /// stops of the update is a placeholder, not a prediction (it would show "à l'arrêt, -14 min").
+  late final _placeholders = () {
+    final seen = <int>{};
+    return {
+      for (final s in stops)
+        if (s.time != null && !seen.add(s.time!)) s.time!,
+    };
+  }();
+
   /// Seconds late (negative: early) at stop [seq] of this trip, null if the update says nothing about it, or [gone]
   /// if the bus won't stop there (canceled, stop skipped, already passed). [times] are the trip's scheduled epoch
   /// seconds by stop_sequence: a stop without its own update takes the delay of the closest earlier one (GTFS-RT).
@@ -146,7 +156,9 @@ class TripUpdate {
     if (canceled) return gone;
     int? before;
     for (final s in stops) {
-      final at = s.time == null ? s.delay : (times[s.seq] == null ? null : s.time! - times[s.seq]!);
+      final at = s.time == null || _placeholders.contains(s.time)
+          ? s.delay
+          : (times[s.seq] == null ? null : s.time! - times[s.seq]!);
       if (s.seq == seq) {
         if (s.skipped) return gone;
         if (at != null) return at;

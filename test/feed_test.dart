@@ -78,6 +78,10 @@ void main() {
     expect(update([(2, null, null, true)]).delayAt(2, times), TripUpdate.gone); // skipped
     expect(update([(2, 1160, null, false)], canceled: true).delayAt(4, times), TripUpdate.gone);
     expect(update([]).delayAt(2, times), isNull);
+    // Trip not started: TCAT stamps several stops with the feed's time, that's no prediction.
+    final waiting = update([(1, 500, null, false), (2, 500, null, false), (3, 1260, null, false)]);
+    expect(waiting.delayAt(1, times), isNull);
+    expect(waiting.delayAt(3, times), 60);
   });
 
   test('reads the App Group renamed by a re-signing tool', () {
