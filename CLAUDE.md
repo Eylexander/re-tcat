@@ -42,8 +42,10 @@ flutter build apk --release --target-platform android-arm64 # → build/app/outp
 ## Data
 
 - **Timetable**: TCAT's GTFS (`gtfsUrl`, transport.data.gouv.fr, ODbL). Each file is valid a few weeks only, so the
-  app downloads it (2.5 MB) instead of bundling it: at first launch, then when the redirect target changes (checked
-  every 6 hours, `Store.checkTimetable`). `importGtfs` (in an isolate) writes `gtfs.db` aside, then renames it over.
+  app downloads it (2.5 MB) instead of bundling it: at first launch, then when it changes (checked every 6 hours,
+  `Store.checkTimetable`). `gtfsUrl` never changes and answers HEAD with the file's own headers (200, no `Location`:
+  only GET redirects to the dated file), so the version is its ETag; the app also re-downloads when the loaded
+  timetable has no service day left (`Gtfs.expired`), or every stop shows "aucun bus dans les 4 prochaines heures". `importGtfs` (in an isolate) writes `gtfs.db` aside, then renames it over.
   - Agency `MASQUE` (internal routes) is dropped. Stops are grouped into **stations** by `parent_station` (both sides
     of the street); a trip's last stop (and `pickup_type = 1`) has `last = 1`: nobody boards there.
   - Service days start at "noon minus 12 h" (`Gtfs.base`), times can exceed 24 h, so departures look at yesterday,
@@ -100,5 +102,12 @@ flutter build apk --release --target-platform android-arm64 # → build/app/outp
   `~/.local/bin/xtool install re-tcat-vX-unsigned.ipa` signs it with the user's Apple ID and installs it over USB
   (needs `usbmuxd` and a one-time `xtool auth login`).
   - Tapping a widget opens `retcat://stop?station=…` (`&homeWidget` on iOS, for home_widget), handled in `_ShellState`.
+- **Web** (`docs/index.html`): the same thing in the browser, for following the buses without a phone — one static
+  file (Leaflet inlined CSS, no server, no build step), map + stop search + live departures. Its `script id="tcat"`
+  block is the app's data rules (GTFS-RT reader, timetable, `departures`, `delayAt`) in JavaScript: keep it in
+  agreement with `lib/`. `node docs/selftest.mjs` runs that block against the live feeds (delay rules, then a real
+  load). It reads the data.gouv.fr `r/` links, the only ones that allow cross-origin reads. Hosted with GitHub Pages
+  (branch `main`, folder `/docs`); `python -m http.server --directory docs` to try it (a `file://` page cannot fetch).
+
 - **Theme** (`lib/theme.dart`): Material 3 seeded by the wallpaper (`dynamic_color` 1.x: 2.x targets the separate
   `material_ui` package and its types don't match `flutter/material.dart`), else `seed`. Line colors come from GTFS.

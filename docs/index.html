@@ -1,0 +1,1601 @@
+<!-- Re-TCAT on the web: one static file, no server and no build step. Deliberately without <html>/<head>/<body>
+     wrappers so the same file can be published as a Claude artifact, which adds them; browsers imply them anyway.
+     The data layer below (script id="tcat") is the app's own rules (lib/gtfs.dart, lib/realtime.dart) in JavaScript:
+     keep it in agreement with the app and with Eylexander/ha-tcat. site/selftest.mjs runs it against the live feeds. -->
+<title>Re-TCAT</title>
+<meta name="claude:viewport-fit-sides" content="cover">
+<meta name="description" content="Les bus TCAT de Troyes en temps réel, dans le navigateur.">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Archivo:wght@600;700&family=Inter:wght@400;500;600;800&display=swap">
+
+<style>
+/* Layout: a full-height app — sticky header, the map filling the rest, a stop panel beside it (under it on a phone). */
+:root {
+  --bg: #eef1f5;
+  --panel: #ffffff;
+  --sunk: #f6f8fa;
+  --fg: #101720;
+  --muted: #5c6a78;
+  --line: #d8e0e8;
+  --accent: #1f6fb2;
+  --live: #0b7a4b;
+  --late: #b3261e;
+  --early: #6c4bb3;
+  --shadow: 0 1px 2px rgba(16, 23, 32, .08), 0 8px 24px -16px rgba(16, 23, 32, .25);
+  --display: "Archivo", "Segoe UI", system-ui, sans-serif;
+  --text: "Inter", "Segoe UI", system-ui, sans-serif;
+}
+@media (prefers-color-scheme: dark) {
+  :root:not([data-theme="light"]) {
+    --bg: #0d1116;
+    --panel: #161d25;
+    --sunk: #1d2630;
+    --fg: #e6edf4;
+    --muted: #93a2b1;
+    --line: #27323e;
+    --accent: #6cb0e8;
+    --live: #4cc38a;
+    --late: #f2836b;
+    --early: #b9a3ef;
+    --shadow: 0 1px 2px rgba(0, 0, 0, .4), 0 8px 24px -16px rgba(0, 0, 0, .8);
+    color-scheme: dark;
+  }
+}
+:root[data-theme="dark"] {
+  --bg: #0d1116;
+  --panel: #161d25;
+  --sunk: #1d2630;
+  --fg: #e6edf4;
+  --muted: #93a2b1;
+  --line: #27323e;
+  --accent: #6cb0e8;
+  --live: #4cc38a;
+  --late: #f2836b;
+  --early: #b9a3ef;
+  --shadow: 0 1px 2px rgba(0, 0, 0, .4), 0 8px 24px -16px rgba(0, 0, 0, .8);
+  color-scheme: dark;
+}
+
+html, body { height: 100%; }
+body {
+  margin: 0;
+  background: var(--bg);
+  color: var(--fg);
+  font: 400 15px/1.45 var(--text);
+  -webkit-text-size-adjust: 100%;
+}
+* { box-sizing: border-box; }
+button { font: inherit; color: inherit; }
+
+#app {
+  height: 100%;
+  display: grid;
+  grid-template-rows: auto 1fr;
+}
+
+header {
+  background: var(--panel);
+  border-bottom: 1px solid var(--line);
+  padding-block: 10px;
+  padding-left: max(16px, env(safe-area-inset-left, 0px));
+  padding-right: max(16px, env(safe-area-inset-right, 0px));
+  display: flex;
+  align-items: center;
+  gap: 12px 16px;
+  flex-wrap: wrap;
+}
+h1 {
+  margin: 0;
+  font: 700 19px/1 var(--display);
+  letter-spacing: -.01em;
+}
+h1 span { color: var(--accent); }
+#status {
+  font-size: 12.5px;
+  color: var(--muted);
+  font-variant-numeric: tabular-nums;
+  display: flex;
+  align-items: center;
+  gap: 6px;
+}
+#status .dot {
+  width: 7px; height: 7px; border-radius: 50%;
+  background: var(--live);
+}
+#status.off .dot { background: var(--late); }
+.grow { flex: 1 1 0; min-width: 0; }
+#reload {
+  border: 1px solid var(--line);
+  background: var(--sunk);
+  border-radius: 8px;
+  padding: 6px 12px;
+  font-size: 13px;
+  font-weight: 500;
+  cursor: pointer;
+}
+#reload:hover { border-color: var(--accent); color: var(--accent); }
+
+main {
+  display: grid;
+  grid-template-columns: 1fr minmax(320px, 27%);
+  min-height: 0;
+}
+@media (max-width: 760px) {
+  main { grid-template-columns: 1fr; grid-template-rows: 46% 1fr; }
+}
+
+#map { height: 100%; background: var(--sunk); z-index: 0; }
+#map.dark { filter: invert(1) hue-rotate(180deg) brightness(.95) contrast(.9); }
+.leaflet-container { font: inherit; background: var(--sunk); }
+.leaflet-popup-content-wrapper, .leaflet-popup-tip { background: var(--panel); color: var(--fg); }
+.leaflet-popup-content { margin: 10px 14px; font: inherit; }
+.leaflet-bar a, .leaflet-control-attribution { background: var(--panel) !important; color: var(--muted) !important; }
+.leaflet-bar a { color: var(--fg) !important; border-color: var(--line) !important; }
+.leaflet-control-attribution a { color: var(--accent) !important; }
+
+/* A bus: its line's number in TCAT's colors, nose pointing where it goes. */
+.bus {
+  position: relative;
+  display: grid;
+  place-items: center;
+  font: 800 11px/1 var(--text);
+  border-radius: 7px;
+  box-shadow: 0 1px 4px rgba(0, 0, 0, .45);
+  border: 1.5px solid rgba(255, 255, 255, .85);
+}
+.bus i {
+  position: absolute;
+  width: 5px; height: 5px;
+  border-radius: 50%;
+  background: #fff;
+  box-shadow: 0 0 0 1.5px rgba(0, 0, 0, .35);
+  transform: translate(var(--nx, 0), var(--ny, 0));
+}
+.stopdot {
+  width: 9px; height: 9px;
+  border-radius: 50%;
+  background: var(--panel);
+  border: 2px solid var(--muted);
+}
+
+#panel {
+  background: var(--panel);
+  border-left: 1px solid var(--line);
+  min-width: 0;
+  min-height: 0;
+  overflow-y: auto;
+  display: flex;
+  flex-direction: column;
+}
+@media (max-width: 760px) { #panel { border-left: 0; border-top: 1px solid var(--line); } }
+.pad {
+  padding-block: 12px;
+  padding-left: max(16px, env(safe-area-inset-left, 0px));
+  padding-right: max(16px, env(safe-area-inset-right, 0px));
+}
+#search {
+  width: 100%;
+  border: 1px solid var(--line);
+  background: var(--sunk);
+  color: var(--fg);
+  border-radius: 10px;
+  padding: 9px 12px;
+  font: inherit;
+}
+#search:focus-visible, button:focus-visible, .row:focus-visible { outline: 2px solid var(--accent); outline-offset: 2px; }
+
+.eyebrow {
+  font: 600 11px/1 var(--text);
+  letter-spacing: .09em;
+  text-transform: uppercase;
+  color: var(--muted);
+  padding: 14px max(16px, env(safe-area-inset-left, 0px)) 6px;
+}
+.row {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  width: 100%;
+  text-align: left;
+  background: none;
+  border: 0;
+  border-top: 1px solid var(--line);
+  padding: 9px max(16px, env(safe-area-inset-right, 0px)) 9px max(16px, env(safe-area-inset-left, 0px));
+  cursor: pointer;
+}
+.row:hover { background: var(--sunk); }
+.row[data-trip] { cursor: default; }
+.row .grow { overflow: hidden; }
+.name { font-weight: 500; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.sub { font-size: 12.5px; color: var(--muted); display: flex; align-items: center; gap: 5px; flex-wrap: wrap; }
+.badges { display: flex; gap: 4px; flex-wrap: wrap; margin-top: 4px; }
+.badge {
+  font: 800 11px/1 var(--text);
+  padding: 4px 6px;
+  border-radius: 5px;
+  min-width: 22px;
+  text-align: center;
+}
+.badge.big { font-size: 14px; padding: 7px 8px; min-width: 30px; }
+.when {
+  font: 600 16px/1 var(--text);
+  font-variant-numeric: tabular-nums;
+  white-space: nowrap;
+  display: flex;
+  align-items: center;
+  gap: 5px;
+}
+.when svg { color: var(--live); }
+.rt { color: var(--live); }
+.late { color: var(--late); }
+.early { color: var(--early); }
+.note { padding: 24px max(16px, env(safe-area-inset-left, 0px)); color: var(--muted); font-size: 13.5px; }
+.note b { color: var(--fg); font-weight: 600; }
+#back {
+  border: 0; background: none; cursor: pointer;
+  color: var(--accent); font-size: 13px; font-weight: 500;
+  padding: 12px max(16px, env(safe-area-inset-left, 0px)) 0;
+  display: flex; align-items: center; gap: 6px;
+}
+h2 {
+  font: 600 18px/1.2 var(--display);
+  margin: 6px 0 2px;
+  padding-inline: max(16px, env(safe-area-inset-left, 0px));
+  text-wrap: balance;
+}
+#chips {
+  display: flex;
+  gap: 6px;
+  overflow-x: auto;
+  padding: 8px max(16px, env(safe-area-inset-left, 0px));
+  border-bottom: 1px solid var(--line);
+  background: var(--panel);
+  scrollbar-width: thin;
+}
+#chips button {
+  border: 1px solid var(--line);
+  background: var(--panel);
+  border-radius: 999px;
+  padding: 4px 9px 4px 5px;
+  display: flex; align-items: center; gap: 5px;
+  font: 600 12px/1 var(--text);
+  cursor: pointer;
+  white-space: nowrap;
+}
+#chips button[aria-pressed="true"] { border-color: var(--accent); background: var(--sunk); }
+#chips .pip { width: 9px; height: 9px; border-radius: 3px; }
+footer { color: var(--muted); font-size: 11.5px; padding-block: 14px 20px; }
+footer a { color: var(--accent); }
+@media (prefers-reduced-motion: reduce) { * { transition: none !important; } }
+/* Leaflet 1.9.4, inlined (its few url(images/...) rules are unused here). */
+/* required styles */
+
+.leaflet-pane,
+.leaflet-tile,
+.leaflet-marker-icon,
+.leaflet-marker-shadow,
+.leaflet-tile-container,
+.leaflet-pane > svg,
+.leaflet-pane > canvas,
+.leaflet-zoom-box,
+.leaflet-image-layer,
+.leaflet-layer {
+	position: absolute;
+	left: 0;
+	top: 0;
+	}
+.leaflet-container {
+	overflow: hidden;
+	}
+.leaflet-tile,
+.leaflet-marker-icon,
+.leaflet-marker-shadow {
+	-webkit-user-select: none;
+	   -moz-user-select: none;
+	        user-select: none;
+	  -webkit-user-drag: none;
+	}
+/* Prevents IE11 from highlighting tiles in blue */
+.leaflet-tile::selection {
+	background: transparent;
+}
+/* Safari renders non-retina tile on retina better with this, but Chrome is worse */
+.leaflet-safari .leaflet-tile {
+	image-rendering: -webkit-optimize-contrast;
+	}
+/* hack that prevents hw layers "stretching" when loading new tiles */
+.leaflet-safari .leaflet-tile-container {
+	width: 1600px;
+	height: 1600px;
+	-webkit-transform-origin: 0 0;
+	}
+.leaflet-marker-icon,
+.leaflet-marker-shadow {
+	display: block;
+	}
+/* .leaflet-container svg: reset svg max-width decleration shipped in Joomla! (joomla.org) 3.x */
+/* .leaflet-container img: map is broken in FF if you have max-width: 100% on tiles */
+.leaflet-container .leaflet-overlay-pane svg {
+	max-width: none !important;
+	max-height: none !important;
+	}
+.leaflet-container .leaflet-marker-pane img,
+.leaflet-container .leaflet-shadow-pane img,
+.leaflet-container .leaflet-tile-pane img,
+.leaflet-container img.leaflet-image-layer,
+.leaflet-container .leaflet-tile {
+	max-width: none !important;
+	max-height: none !important;
+	width: auto;
+	padding: 0;
+	}
+
+.leaflet-container img.leaflet-tile {
+	/* See: https://bugs.chromium.org/p/chromium/issues/detail?id=600120 */
+	mix-blend-mode: plus-lighter;
+}
+
+.leaflet-container.leaflet-touch-zoom {
+	-ms-touch-action: pan-x pan-y;
+	touch-action: pan-x pan-y;
+	}
+.leaflet-container.leaflet-touch-drag {
+	-ms-touch-action: pinch-zoom;
+	/* Fallback for FF which doesn't support pinch-zoom */
+	touch-action: none;
+	touch-action: pinch-zoom;
+}
+.leaflet-container.leaflet-touch-drag.leaflet-touch-zoom {
+	-ms-touch-action: none;
+	touch-action: none;
+}
+.leaflet-container {
+	-webkit-tap-highlight-color: transparent;
+}
+.leaflet-container a {
+	-webkit-tap-highlight-color: rgba(51, 181, 229, 0.4);
+}
+.leaflet-tile {
+	filter: inherit;
+	visibility: hidden;
+	}
+.leaflet-tile-loaded {
+	visibility: inherit;
+	}
+.leaflet-zoom-box {
+	width: 0;
+	height: 0;
+	-moz-box-sizing: border-box;
+	     box-sizing: border-box;
+	z-index: 800;
+	}
+/* workaround for https://bugzilla.mozilla.org/show_bug.cgi?id=888319 */
+.leaflet-overlay-pane svg {
+	-moz-user-select: none;
+	}
+
+.leaflet-pane         { z-index: 400; }
+
+.leaflet-tile-pane    { z-index: 200; }
+.leaflet-overlay-pane { z-index: 400; }
+.leaflet-shadow-pane  { z-index: 500; }
+.leaflet-marker-pane  { z-index: 600; }
+.leaflet-tooltip-pane   { z-index: 650; }
+.leaflet-popup-pane   { z-index: 700; }
+
+.leaflet-map-pane canvas { z-index: 100; }
+.leaflet-map-pane svg    { z-index: 200; }
+
+.leaflet-vml-shape {
+	width: 1px;
+	height: 1px;
+	}
+.lvml {
+	behavior: url(#default#VML);
+	display: inline-block;
+	position: absolute;
+	}
+
+
+/* control positioning */
+
+.leaflet-control {
+	position: relative;
+	z-index: 800;
+	pointer-events: visiblePainted; /* IE 9-10 doesn't have auto */
+	pointer-events: auto;
+	}
+.leaflet-top,
+.leaflet-bottom {
+	position: absolute;
+	z-index: 1000;
+	pointer-events: none;
+	}
+.leaflet-top {
+	top: 0;
+	}
+.leaflet-right {
+	right: 0;
+	}
+.leaflet-bottom {
+	bottom: 0;
+	}
+.leaflet-left {
+	left: 0;
+	}
+.leaflet-control {
+	float: left;
+	clear: both;
+	}
+.leaflet-right .leaflet-control {
+	float: right;
+	}
+.leaflet-top .leaflet-control {
+	margin-top: 10px;
+	}
+.leaflet-bottom .leaflet-control {
+	margin-bottom: 10px;
+	}
+.leaflet-left .leaflet-control {
+	margin-left: 10px;
+	}
+.leaflet-right .leaflet-control {
+	margin-right: 10px;
+	}
+
+
+/* zoom and fade animations */
+
+.leaflet-fade-anim .leaflet-popup {
+	opacity: 0;
+	-webkit-transition: opacity 0.2s linear;
+	   -moz-transition: opacity 0.2s linear;
+	        transition: opacity 0.2s linear;
+	}
+.leaflet-fade-anim .leaflet-map-pane .leaflet-popup {
+	opacity: 1;
+	}
+.leaflet-zoom-animated {
+	-webkit-transform-origin: 0 0;
+	    -ms-transform-origin: 0 0;
+	        transform-origin: 0 0;
+	}
+svg.leaflet-zoom-animated {
+	will-change: transform;
+}
+
+.leaflet-zoom-anim .leaflet-zoom-animated {
+	-webkit-transition: -webkit-transform 0.25s cubic-bezier(0,0,0.25,1);
+	   -moz-transition:    -moz-transform 0.25s cubic-bezier(0,0,0.25,1);
+	        transition:         transform 0.25s cubic-bezier(0,0,0.25,1);
+	}
+.leaflet-zoom-anim .leaflet-tile,
+.leaflet-pan-anim .leaflet-tile {
+	-webkit-transition: none;
+	   -moz-transition: none;
+	        transition: none;
+	}
+
+.leaflet-zoom-anim .leaflet-zoom-hide {
+	visibility: hidden;
+	}
+
+
+/* cursors */
+
+.leaflet-interactive {
+	cursor: pointer;
+	}
+.leaflet-grab {
+	cursor: -webkit-grab;
+	cursor:    -moz-grab;
+	cursor:         grab;
+	}
+.leaflet-crosshair,
+.leaflet-crosshair .leaflet-interactive {
+	cursor: crosshair;
+	}
+.leaflet-popup-pane,
+.leaflet-control {
+	cursor: auto;
+	}
+.leaflet-dragging .leaflet-grab,
+.leaflet-dragging .leaflet-grab .leaflet-interactive,
+.leaflet-dragging .leaflet-marker-draggable {
+	cursor: move;
+	cursor: -webkit-grabbing;
+	cursor:    -moz-grabbing;
+	cursor:         grabbing;
+	}
+
+/* marker & overlays interactivity */
+.leaflet-marker-icon,
+.leaflet-marker-shadow,
+.leaflet-image-layer,
+.leaflet-pane > svg path,
+.leaflet-tile-container {
+	pointer-events: none;
+	}
+
+.leaflet-marker-icon.leaflet-interactive,
+.leaflet-image-layer.leaflet-interactive,
+.leaflet-pane > svg path.leaflet-interactive,
+svg.leaflet-image-layer.leaflet-interactive path {
+	pointer-events: visiblePainted; /* IE 9-10 doesn't have auto */
+	pointer-events: auto;
+	}
+
+/* visual tweaks */
+
+.leaflet-container {
+	background: #ddd;
+	outline-offset: 1px;
+	}
+.leaflet-container a {
+	color: #0078A8;
+	}
+.leaflet-zoom-box {
+	border: 2px dotted #38f;
+	background: rgba(255,255,255,0.5);
+	}
+
+
+/* general typography */
+.leaflet-container {
+	font-family: "Helvetica Neue", Arial, Helvetica, sans-serif;
+	font-size: 12px;
+	font-size: 0.75rem;
+	line-height: 1.5;
+	}
+
+
+/* general toolbar styles */
+
+.leaflet-bar {
+	box-shadow: 0 1px 5px rgba(0,0,0,0.65);
+	border-radius: 4px;
+	}
+.leaflet-bar a {
+	background-color: #fff;
+	border-bottom: 1px solid #ccc;
+	width: 26px;
+	height: 26px;
+	line-height: 26px;
+	display: block;
+	text-align: center;
+	text-decoration: none;
+	color: black;
+	}
+.leaflet-bar a,
+.leaflet-control-layers-toggle {
+	background-position: 50% 50%;
+	background-repeat: no-repeat;
+	display: block;
+	}
+.leaflet-bar a:hover,
+.leaflet-bar a:focus {
+	background-color: #f4f4f4;
+	}
+.leaflet-bar a:first-child {
+	border-top-left-radius: 4px;
+	border-top-right-radius: 4px;
+	}
+.leaflet-bar a:last-child {
+	border-bottom-left-radius: 4px;
+	border-bottom-right-radius: 4px;
+	border-bottom: none;
+	}
+.leaflet-bar a.leaflet-disabled {
+	cursor: default;
+	background-color: #f4f4f4;
+	color: #bbb;
+	}
+
+.leaflet-touch .leaflet-bar a {
+	width: 30px;
+	height: 30px;
+	line-height: 30px;
+	}
+.leaflet-touch .leaflet-bar a:first-child {
+	border-top-left-radius: 2px;
+	border-top-right-radius: 2px;
+	}
+.leaflet-touch .leaflet-bar a:last-child {
+	border-bottom-left-radius: 2px;
+	border-bottom-right-radius: 2px;
+	}
+
+/* zoom control */
+
+.leaflet-control-zoom-in,
+.leaflet-control-zoom-out {
+	font: bold 18px 'Lucida Console', Monaco, monospace;
+	text-indent: 1px;
+	}
+
+.leaflet-touch .leaflet-control-zoom-in, .leaflet-touch .leaflet-control-zoom-out  {
+	font-size: 22px;
+	}
+
+
+/* layers control */
+
+.leaflet-control-layers {
+	box-shadow: 0 1px 5px rgba(0,0,0,0.4);
+	background: #fff;
+	border-radius: 5px;
+	}
+.leaflet-control-layers-toggle {
+	background-image: url(images/layers.png);
+	width: 36px;
+	height: 36px;
+	}
+.leaflet-retina .leaflet-control-layers-toggle {
+	background-image: url(images/layers-2x.png);
+	background-size: 26px 26px;
+	}
+.leaflet-touch .leaflet-control-layers-toggle {
+	width: 44px;
+	height: 44px;
+	}
+.leaflet-control-layers .leaflet-control-layers-list,
+.leaflet-control-layers-expanded .leaflet-control-layers-toggle {
+	display: none;
+	}
+.leaflet-control-layers-expanded .leaflet-control-layers-list {
+	display: block;
+	position: relative;
+	}
+.leaflet-control-layers-expanded {
+	padding: 6px 10px 6px 6px;
+	color: #333;
+	background: #fff;
+	}
+.leaflet-control-layers-scrollbar {
+	overflow-y: scroll;
+	overflow-x: hidden;
+	padding-right: 5px;
+	}
+.leaflet-control-layers-selector {
+	margin-top: 2px;
+	position: relative;
+	top: 1px;
+	}
+.leaflet-control-layers label {
+	display: block;
+	font-size: 13px;
+	font-size: 1.08333em;
+	}
+.leaflet-control-layers-separator {
+	height: 0;
+	border-top: 1px solid #ddd;
+	margin: 5px -10px 5px -6px;
+	}
+
+/* Default icon URLs */
+.leaflet-default-icon-path { /* used only in path-guessing heuristic, see L.Icon.Default */
+	background-image: url(images/marker-icon.png);
+	}
+
+
+/* attribution and scale controls */
+
+.leaflet-container .leaflet-control-attribution {
+	background: #fff;
+	background: rgba(255, 255, 255, 0.8);
+	margin: 0;
+	}
+.leaflet-control-attribution,
+.leaflet-control-scale-line {
+	padding: 0 5px;
+	color: #333;
+	line-height: 1.4;
+	}
+.leaflet-control-attribution a {
+	text-decoration: none;
+	}
+.leaflet-control-attribution a:hover,
+.leaflet-control-attribution a:focus {
+	text-decoration: underline;
+	}
+.leaflet-attribution-flag {
+	display: inline !important;
+	vertical-align: baseline !important;
+	width: 1em;
+	height: 0.6669em;
+	}
+.leaflet-left .leaflet-control-scale {
+	margin-left: 5px;
+	}
+.leaflet-bottom .leaflet-control-scale {
+	margin-bottom: 5px;
+	}
+.leaflet-control-scale-line {
+	border: 2px solid #777;
+	border-top: none;
+	line-height: 1.1;
+	padding: 2px 5px 1px;
+	white-space: nowrap;
+	-moz-box-sizing: border-box;
+	     box-sizing: border-box;
+	background: rgba(255, 255, 255, 0.8);
+	text-shadow: 1px 1px #fff;
+	}
+.leaflet-control-scale-line:not(:first-child) {
+	border-top: 2px solid #777;
+	border-bottom: none;
+	margin-top: -2px;
+	}
+.leaflet-control-scale-line:not(:first-child):not(:last-child) {
+	border-bottom: 2px solid #777;
+	}
+
+.leaflet-touch .leaflet-control-attribution,
+.leaflet-touch .leaflet-control-layers,
+.leaflet-touch .leaflet-bar {
+	box-shadow: none;
+	}
+.leaflet-touch .leaflet-control-layers,
+.leaflet-touch .leaflet-bar {
+	border: 2px solid rgba(0,0,0,0.2);
+	background-clip: padding-box;
+	}
+
+
+/* popup */
+
+.leaflet-popup {
+	position: absolute;
+	text-align: center;
+	margin-bottom: 20px;
+	}
+.leaflet-popup-content-wrapper {
+	padding: 1px;
+	text-align: left;
+	border-radius: 12px;
+	}
+.leaflet-popup-content {
+	margin: 13px 24px 13px 20px;
+	line-height: 1.3;
+	font-size: 13px;
+	font-size: 1.08333em;
+	min-height: 1px;
+	}
+.leaflet-popup-content p {
+	margin: 17px 0;
+	margin: 1.3em 0;
+	}
+.leaflet-popup-tip-container {
+	width: 40px;
+	height: 20px;
+	position: absolute;
+	left: 50%;
+	margin-top: -1px;
+	margin-left: -20px;
+	overflow: hidden;
+	pointer-events: none;
+	}
+.leaflet-popup-tip {
+	width: 17px;
+	height: 17px;
+	padding: 1px;
+
+	margin: -10px auto 0;
+	pointer-events: auto;
+
+	-webkit-transform: rotate(45deg);
+	   -moz-transform: rotate(45deg);
+	    -ms-transform: rotate(45deg);
+	        transform: rotate(45deg);
+	}
+.leaflet-popup-content-wrapper,
+.leaflet-popup-tip {
+	background: white;
+	color: #333;
+	box-shadow: 0 3px 14px rgba(0,0,0,0.4);
+	}
+.leaflet-container a.leaflet-popup-close-button {
+	position: absolute;
+	top: 0;
+	right: 0;
+	border: none;
+	text-align: center;
+	width: 24px;
+	height: 24px;
+	font: 16px/24px Tahoma, Verdana, sans-serif;
+	color: #757575;
+	text-decoration: none;
+	background: transparent;
+	}
+.leaflet-container a.leaflet-popup-close-button:hover,
+.leaflet-container a.leaflet-popup-close-button:focus {
+	color: #585858;
+	}
+.leaflet-popup-scrolled {
+	overflow: auto;
+	}
+
+.leaflet-oldie .leaflet-popup-content-wrapper {
+	-ms-zoom: 1;
+	}
+.leaflet-oldie .leaflet-popup-tip {
+	width: 24px;
+	margin: 0 auto;
+
+	-ms-filter: "progid:DXImageTransform.Microsoft.Matrix(M11=0.70710678, M12=0.70710678, M21=-0.70710678, M22=0.70710678)";
+	filter: progid:DXImageTransform.Microsoft.Matrix(M11=0.70710678, M12=0.70710678, M21=-0.70710678, M22=0.70710678);
+	}
+
+.leaflet-oldie .leaflet-control-zoom,
+.leaflet-oldie .leaflet-control-layers,
+.leaflet-oldie .leaflet-popup-content-wrapper,
+.leaflet-oldie .leaflet-popup-tip {
+	border: 1px solid #999;
+	}
+
+
+/* div icon */
+
+.leaflet-div-icon {
+	background: #fff;
+	border: 1px solid #666;
+	}
+
+
+/* Tooltip */
+/* Base styles for the element that has a tooltip */
+.leaflet-tooltip {
+	position: absolute;
+	padding: 6px;
+	background-color: #fff;
+	border: 1px solid #fff;
+	border-radius: 3px;
+	color: #222;
+	white-space: nowrap;
+	-webkit-user-select: none;
+	-moz-user-select: none;
+	-ms-user-select: none;
+	user-select: none;
+	pointer-events: none;
+	box-shadow: 0 1px 3px rgba(0,0,0,0.4);
+	}
+.leaflet-tooltip.leaflet-interactive {
+	cursor: pointer;
+	pointer-events: auto;
+	}
+.leaflet-tooltip-top:before,
+.leaflet-tooltip-bottom:before,
+.leaflet-tooltip-left:before,
+.leaflet-tooltip-right:before {
+	position: absolute;
+	pointer-events: none;
+	border: 6px solid transparent;
+	background: transparent;
+	content: "";
+	}
+
+/* Directions */
+
+.leaflet-tooltip-bottom {
+	margin-top: 6px;
+}
+.leaflet-tooltip-top {
+	margin-top: -6px;
+}
+.leaflet-tooltip-bottom:before,
+.leaflet-tooltip-top:before {
+	left: 50%;
+	margin-left: -6px;
+	}
+.leaflet-tooltip-top:before {
+	bottom: 0;
+	margin-bottom: -12px;
+	border-top-color: #fff;
+	}
+.leaflet-tooltip-bottom:before {
+	top: 0;
+	margin-top: -12px;
+	margin-left: -6px;
+	border-bottom-color: #fff;
+	}
+.leaflet-tooltip-left {
+	margin-left: -6px;
+}
+.leaflet-tooltip-right {
+	margin-left: 6px;
+}
+.leaflet-tooltip-left:before,
+.leaflet-tooltip-right:before {
+	top: 50%;
+	margin-top: -6px;
+	}
+.leaflet-tooltip-left:before {
+	right: 0;
+	margin-right: -12px;
+	border-left-color: #fff;
+	}
+.leaflet-tooltip-right:before {
+	left: 0;
+	margin-left: -12px;
+	border-right-color: #fff;
+	}
+
+/* Printing */
+
+@media print {
+	/* Prevent printers from removing background-images of controls. */
+	.leaflet-control {
+		-webkit-print-color-adjust: exact;
+		print-color-adjust: exact;
+		}
+	}
+</style>
+
+<div id="app">
+  <header>
+    <h1>Re-<span>TCAT</span></h1>
+    <div id="status"><span class="dot"></span><span id="statustext">Chargement…</span></div>
+    <div class="grow"></div>
+    <button id="reload" type="button">Actualiser</button>
+  </header>
+  <main>
+    <div id="map"></div>
+    <div id="panel">
+      <div id="chips" hidden></div>
+      <div class="pad"><input id="search" type="search" placeholder="Rechercher un arrêt" autocomplete="off"></div>
+      <div id="list" class="grow"></div>
+      <footer class="pad">
+        <span id="valid"></span>
+        Données TCAT / Troyes Champagne Métropole via
+        <a href="https://transport.data.gouv.fr/datasets/donnees-tcat-troyes-champagne-metropole" target="_blank" rel="noopener">transport.data.gouv.fr</a>
+        (ODbL). Application non officielle.
+      </footer>
+    </div>
+  </main>
+</div>
+
+<script id="tcat">
+// The app's data rules, in the browser: GTFS-RT wire reading, the GTFS timetable, and the departures of a stop.
+// Mirrors lib/realtime.dart and lib/gtfs.dart. Field numbers are from gtfs-realtime.proto.
+var TCAT = (() => {
+  // The data.gouv.fr "r/" links: stable, and they allow cross-origin reads on both hops of the redirect
+  // (transport.data.gouv.fr itself does not, so the app's own gtfsUrl cannot be used from a page).
+  // shortcut: the GTFS link is the resource id behind TCAT's dataset; if TCAT ever replaces the resource instead of
+  // the file, update it from https://transport.data.gouv.fr/datasets/donnees-tcat-troyes-champagne-metropole.
+  const FEEDS = {
+    gtfs: 'https://www.data.gouv.fr/api/1/datasets/r/764e07f3-4297-44ac-810e-f3db295dbef6',
+    vehicles: 'https://www.data.gouv.fr/api/1/datasets/r/98230d13-cccb-4c27-b0bc-d1b9341ca77b',
+    tripUpdates: 'https://www.data.gouv.fr/api/1/datasets/r/8dc66569-b744-4d22-95df-f8496e8eddb6',
+  };
+  const HIDDEN_AGENCY = 'MASQUE';   // TCAT's internal routes (relief buses, workshop)
+  const RT_MATCH = 3 * 3600;        // a live update applies to the run of a trip within ±3 h: the feed has no date
+  const GONE = -(2 ** 40);          // the bus will not stop there
+  const DAYS = ['monday', 'tuesday', 'wednesday', 'thursday', 'friday', 'saturday', 'sunday'];
+
+  /** A protobuf message decoded into its fields. Varints are read as BigInt, so 64-bit values stay exact. */
+  class Msg {
+    constructor(b) {
+      this.f = new Map();
+      const dv = new DataView(b.buffer, b.byteOffset, b.byteLength);
+      let pos = 0;
+      const varint = () => {
+        let r = 0n, shift = 0n;
+        for (;;) {
+          const x = b[pos++];
+          r |= BigInt(x & 0x7f) << shift;
+          if (x < 0x80) return r;
+          shift += 7n;
+        }
+      };
+      while (pos < b.length) {
+        const key = Number(varint());
+        let v;
+        switch (key & 7) {
+          case 0: v = varint(); break;
+          case 1: v = dv.getBigInt64(pos, true); pos += 8; break;
+          case 2: { const len = Number(varint()); v = b.subarray(pos, pos += len); break; }
+          case 5: v = dv.getFloat32(pos, true); pos += 4; break;
+          default: throw new Error('type de champ protobuf inconnu');
+        }
+        const at = this.f.get(key >> 3);
+        if (at) at.push(v); else this.f.set(key >> 3, [v]);
+      }
+    }
+    first(n) { const l = this.f.get(n); return l ? l[0] : undefined; }
+    has(n) { return this.f.has(n); }
+    int(n) { const v = this.first(n); return typeof v === 'bigint' ? Number(BigInt.asIntN(64, v)) : 0; }
+    i32(n) { const v = this.first(n); return typeof v === 'bigint' ? Number(BigInt.asIntN(32, v)) : 0; }
+    float(n) { const v = this.first(n); return typeof v === 'number' ? v : 0; }
+    str(n) { const v = this.first(n); return v instanceof Uint8Array ? new TextDecoder().decode(v) : ''; }
+    msg(n) { const v = this.first(n); return new Msg(v instanceof Uint8Array ? v : new Uint8Array(0)); }
+    all(n) { return (this.f.get(n) || []).filter((v) => v instanceof Uint8Array).map((v) => new Msg(v)); }
+  }
+
+  /** The entities of a feed, dropping the deleted ones. */
+  const entities = (bytes) => new Msg(bytes).all(2).filter((e) => e.int(2) === 0);
+
+  function parseVehicles(bytes) {
+    const out = [];
+    for (const e of entities(bytes)) {
+      if (!e.has(4) || !e.msg(4).has(2)) continue;
+      const v = e.msg(4), trip = v.msg(1), p = v.msg(2);
+      out.push({
+        trip: trip.str(1), route: trip.str(5),
+        lat: p.float(1), lon: p.float(2), bearing: p.float(3), speed: p.float(5),
+        status: Math.min(2, Math.max(0, v.int(4))), time: v.int(5), stopId: v.str(7),
+        id: v.msg(8).str(1), label: v.msg(8).str(2),
+      });
+    }
+    return out;
+  }
+
+  /** Live predictions by trip id. */
+  function parseTripUpdates(bytes) {
+    const out = new Map();
+    for (const e of entities(bytes)) {
+      if (!e.has(3)) continue;
+      const t = e.msg(3), trip = t.msg(1);
+      const stops = t.all(2).map((s) => {
+        const arr = s.msg(2), dep = s.msg(3);
+        return {
+          seq: s.int(1), stopId: s.str(4), skipped: s.int(5) === 1,
+          time: dep.has(2) ? dep.int(2) : (arr.has(2) ? arr.int(2) : null),
+          delay: dep.has(1) ? dep.i32(1) : (arr.has(1) ? arr.i32(1) : null),
+        };
+      });
+      // Before a trip starts, TCAT gives many of its stops the feed's timestamp: a time shared by several stops of
+      // one update is a placeholder, not a prediction (it would read "à l'arrêt, -14 min").
+      const seen = new Set(), placeholders = new Set();
+      for (const s of stops) {
+        if (s.time == null) continue;
+        if (seen.has(s.time)) placeholders.add(s.time); else seen.add(s.time);
+      }
+      out.set(trip.str(1), {
+        trip: trip.str(1), canceled: trip.int(4) === 3,
+        delay: t.has(5) ? t.i32(5) : null, stops, placeholders,
+      });
+    }
+    return out;
+  }
+
+  /**
+   * Seconds late (negative: early) at stop [seq], null when the update says nothing about it, GONE when the bus
+   * will not stop there (canceled, skipped, already passed). [sched] gives a stop's scheduled epoch seconds.
+   * Same rules as `live_delay` in Eylexander/ha-tcat and TripUpdate.delayAt in the app.
+   */
+  function delayAt(u, seq, sched) {
+    if (u.canceled) return GONE;
+    let before = null;
+    for (const s of u.stops) {
+      const planned = sched(s.seq);
+      const at = (s.time == null || u.placeholders.has(s.time))
+        ? s.delay
+        : (planned == null ? null : s.time - planned);
+      if (s.seq === seq) {
+        if (s.skipped) return GONE;
+        if (at != null) return at;
+      }
+      if (s.seq < seq && at != null) before = at;
+    }
+    if (before != null) return before;
+    if (u.stops.length && u.stops.every((s) => s.seq > seq)) return GONE;
+    return u.delay;
+  }
+
+  // --- GTFS ---------------------------------------------------------------------------------------------------
+
+  /** Just enough zip to read the GTFS: walk the central directory, inflate the entries asked for. */
+  async function unzip(b, want) {
+    const dv = new DataView(b.buffer, b.byteOffset, b.byteLength);
+    let eocd = -1;
+    for (let i = b.length - 22; i >= 0 && i > b.length - 65558; i--) {
+      if (dv.getUint32(i, true) === 0x06054b50) { eocd = i; break; }
+    }
+    if (eocd < 0) throw new Error('le fichier horaires n\'est pas une archive zip');
+    const count = dv.getUint16(eocd + 10, true);
+    let p = dv.getUint32(eocd + 16, true);
+    const out = {};
+    for (let i = 0; i < count; i++) {
+      if (dv.getUint32(p, true) !== 0x02014b50) throw new Error('index zip illisible');
+      const method = dv.getUint16(p + 10, true);
+      const packed = dv.getUint32(p + 20, true);
+      const nameLen = dv.getUint16(p + 28, true);
+      const skip = nameLen + dv.getUint16(p + 30, true) + dv.getUint16(p + 32, true);
+      const at = dv.getUint32(p + 42, true);
+      const name = new TextDecoder().decode(b.subarray(p + 46, p + 46 + nameLen)).split('/').pop();
+      p += 46 + skip;
+      if (!want.has(name)) continue;
+      const from = at + 30 + dv.getUint16(at + 26, true) + dv.getUint16(at + 28, true);
+      const raw = b.subarray(from, from + packed);
+      if (method === 0) out[name] = raw;
+      else if (method === 8) out[name] = await inflate(raw);
+      else throw new Error(`compression zip ${method} non gérée`);
+    }
+    return out;
+  }
+
+  async function inflate(bytes) {
+    const stream = new Blob([bytes]).stream().pipeThrough(new DecompressionStream('deflate-raw'));
+    return new Uint8Array(await new Response(stream).arrayBuffer());
+  }
+
+  /** UTF-8 with BOM, else UTF-8, else Latin-1: TCAT's export used cp1252. */
+  function decode(bytes) {
+    if (bytes[0] === 0xef && bytes[1] === 0xbb && bytes[2] === 0xbf) bytes = bytes.subarray(3);
+    try {
+      return new TextDecoder('utf-8', { fatal: true }).decode(bytes);
+    } catch {
+      return new TextDecoder('windows-1252').decode(bytes);
+    }
+  }
+
+  function fields(line) {
+    const out = [];
+    let cur = '', quoted = false;
+    for (let i = 0; i < line.length; i++) {
+      const c = line[i];
+      if (quoted) {
+        if (c !== '"') cur += c;
+        else if (line[i + 1] === '"') { cur += '"'; i++; }
+        else quoted = false;
+      } else if (c === '"') quoted = true;
+      else if (c === ',') { out.push(cur); cur = ''; }
+      else cur += c;
+    }
+    out.push(cur);
+    return out;
+  }
+
+  function* rows(bytes) {
+    if (!bytes) return;
+    const lines = decode(bytes).split('\n');
+    const head = fields(lines[0].replace(/\r$/, ''));
+    for (let i = 1; i < lines.length; i++) {
+      const line = lines[i].replace(/\r$/, '');
+      if (!line) continue;
+      const f = fields(line), r = {};
+      for (let j = 0; j < head.length; j++) r[head[j]] = f[j] === undefined ? '' : f[j];
+      yield r;
+    }
+  }
+
+  const secs = (hms) => {
+    const p = hms.trim().split(':');
+    return +p[0] * 3600 + +p[1] * 60 + +p[2];
+  };
+  const ymd = (d) => `${d.getFullYear()}${`${d.getMonth() + 1}`.padStart(2, '0')}${`${d.getDate()}`.padStart(2, '0')}`;
+  const push = (map, key, v) => { const l = map.get(key); if (l) l.push(v); else map.set(key, [v]); };
+
+  /** The timetable: lines, stops grouped into stations, trips and their times, service days. */
+  class Gtfs {
+    constructor(files) {
+      const routeRows = [...rows(files['routes.txt'])].filter((r) => r.agency_id !== HIDDEN_AGENCY);
+      const routeIds = new Set(routeRows.map((r) => r.route_id));
+
+      this.trips = new Map();
+      for (const t of rows(files['trips.txt'])) {
+        if (!routeIds.has(t.route_id)) continue;
+        this.trips.set(t.trip_id, { route: t.route_id, service: t.service_id, dir: t.direction_id || '', terminus: '' });
+      }
+
+      // stop_times: kept per trip, to find its last stop (the terminus) and the stops where nobody boards.
+      const times = new Map();
+      for (const r of rows(files['stop_times.txt'])) {
+        if (!this.trips.has(r.trip_id)) continue;
+        push(times, r.trip_id, {
+          seq: +r.stop_sequence, stop: r.stop_id,
+          secs: secs(r.departure_time || r.arrival_time), noPickup: r.pickup_type === '1',
+        });
+      }
+
+      const stopRows = new Map();
+      for (const s of rows(files['stops.txt'])) stopRows.set(s.stop_id, s);
+
+      const served = new Set(), boardings = new Map();
+      this.tripTimes = new Map();
+      for (const [trip, st] of times) {
+        st.sort((a, b) => a.seq - b.seq);
+        const tt = new Map();
+        for (let i = 0; i < st.length; i++) {
+          const s = st[i];
+          tt.set(s.seq, s.secs);
+          served.add(s.stop);
+          // The last stop of a trip, and pickup_type 1: nobody boards there.
+          if (i < st.length - 1 && !s.noPickup) push(boardings, s.stop, { trip, seq: s.seq, secs: s.secs });
+        }
+        this.tripTimes.set(trip, tt);
+        const last = stopRows.get(st[st.length - 1].stop);
+        this.trips.get(trip).terminus = last ? last.stop_name : '';
+      }
+      for (const id of [...this.trips.keys()]) if (!times.has(id)) this.trips.delete(id);
+
+      // Lines in TCAT's order: numbers, then letters (D1-D7 Sundays, N, ZI...), then the on-demand ones.
+      const used = new Set([...this.trips.values()].map((t) => t.route));
+      const rank = (r) => {
+        const n = r.route_short_name || '';
+        return [(r.route_desc || '').includes('demande') ? 1 : 0, /^\d+$/.test(n) ? +n : 1 << 20, n];
+      };
+      this.routes = new Map();
+      routeRows.filter((r) => used.has(r.route_id)).sort((a, b) => {
+        const x = rank(a), y = rank(b);
+        return x[0] - y[0] || x[1] - y[1] || (x[2] < y[2] ? -1 : x[2] > y[2] ? 1 : 0);
+      }).forEach((r, i) => this.routes.set(r.route_id, {
+        id: r.route_id, short: r.route_short_name || '', long: r.route_long_name || '',
+        color: `#${r.route_color || '1F6FB2'}`, text: `#${r.route_text_color || 'FFFFFF'}`,
+        onDemand: (r.route_desc || '').includes('demande'), sort: i,
+      }));
+
+      // Stops are grouped by their parent station (both sides of the street), or stand alone.
+      this.stops = new Map();
+      this.stations = new Map();
+      for (const s of stopRows.values()) {
+        if (!served.has(s.stop_id)) continue;
+        const parent = s.parent_station && stopRows.has(s.parent_station) ? s.parent_station : s.stop_id;
+        this.stops.set(s.stop_id, {
+          id: s.stop_id, name: s.stop_name, lat: +s.stop_lat, lon: +s.stop_lon, station: parent,
+        });
+        if (!this.stations.has(parent)) {
+          const p = stopRows.get(parent);
+          this.stations.set(parent, {
+            id: parent, name: p.stop_name, lat: +p.stop_lat, lon: +p.stop_lon, routes: new Set(),
+          });
+        }
+      }
+
+      this.byStation = new Map();
+      for (const [stopId, list] of boardings) {
+        const stop = this.stops.get(stopId);
+        if (!stop) continue;
+        for (const b of list) {
+          push(this.byStation, stop.station, b);
+          this.stations.get(stop.station).routes.add(this.trips.get(b.trip).route);
+        }
+      }
+
+      this.calendar = [...rows(files['calendar.txt'])].map((c) => ({
+        service: c.service_id, days: DAYS.map((d) => c[d] || '0').join(''), start: c.start_date, end: c.end_date,
+      }));
+      this.exceptions = new Map();
+      this.validFrom = '99999999';
+      this.validTo = '';
+      for (const c of this.calendar) {
+        if (c.start < this.validFrom) this.validFrom = c.start;
+        if (c.end > this.validTo) this.validTo = c.end;
+      }
+      for (const d of rows(files['calendar_dates.txt'])) {
+        push(this.exceptions, d.date, { service: d.service_id, type: +d.exception_type });
+        if (d.exception_type !== '1') continue;
+        if (d.date < this.validFrom) this.validFrom = d.date;
+        if (d.date > this.validTo) this.validTo = d.date;
+      }
+    }
+
+    /** No service day left: the page must be reloaded to get TCAT's new file. */
+    get expired() { return this.validTo !== '' && ymd(new Date()) > this.validTo; }
+
+    /** Service day start ("noon minus 12 h", so DST days work), in epoch seconds. Assumes Europe/Paris. */
+    static base(day) { return new Date(day.getFullYear(), day.getMonth(), day.getDate(), 12).getTime() / 1000 - 12 * 3600; }
+
+    services(day) {
+      const d = ymd(day), weekday = (day.getDay() + 6) % 7;
+      const on = new Set();
+      for (const c of this.calendar) {
+        if (c.start <= d && d <= c.end && c.days[weekday] === '1') on.add(c.service);
+      }
+      for (const e of this.exceptions.get(d) || []) {
+        if (e.type === 1) on.add(e.service); else on.delete(e.service);
+      }
+      return on;
+    }
+
+    stationRoutes(station) {
+      const s = this.stations.get(station);
+      return s ? [...s.routes].map((r) => this.routes.get(r)).filter(Boolean).sort((a, b) => a.sort - b.sort) : [];
+    }
+
+    /**
+     * The next buses leaving [station] (any of its stops) within [hours], with the live delays of [live].
+     * A bus that is canceled, skips the stop or has already passed it is left out.
+     * Service days start at noon minus 12 h and times can exceed 24 h, so yesterday, today and tomorrow are read.
+     */
+    departures(station, now, live, { count = 20, hours = 4, onlyRoutes = null } = {}) {
+      const t = Math.floor(now.getTime() / 1000);
+      const at = this.byStation.get(station) || [];
+      const out = [];
+      for (const offset of [-1, 0, 1]) {
+        const day = new Date(now.getFullYear(), now.getMonth(), now.getDate() + offset);
+        const b = Gtfs.base(day), services = this.services(day);
+        for (const r of at) {
+          if (r.secs < t - b - RT_MATCH || r.secs > t - b + hours * 3600) continue;
+          const trip = this.trips.get(r.trip);
+          if (!services.has(trip.service)) continue;
+          const route = this.routes.get(trip.route);
+          if (!route || (onlyRoutes && !onlyRoutes.has(route.id))) continue;
+          const scheduled = b + r.secs;
+          let delay = null;
+          const u = live.get(r.trip);
+          if (u && Math.abs(scheduled - t) < RT_MATCH) {
+            const tt = this.tripTimes.get(r.trip);
+            delay = delayAt(u, r.seq, (seq) => (tt.has(seq) ? b + tt.get(seq) : null));
+            if (delay === GONE) continue;
+          }
+          const time = scheduled + (delay || 0);
+          if (time < t - 30 || time > t + hours * 3600) continue;
+          out.push({ route, trip: r.trip, terminus: trip.terminus, seq: r.seq, scheduled, delay, time });
+        }
+      }
+      out.sort((a, b) => a.time - b.time);
+      return out.slice(0, count);
+    }
+  }
+
+  const feed = async (url) => new Uint8Array(await (await fetch(url, { cache: 'no-store' })).arrayBuffer());
+
+  /** Downloads TCAT's GTFS (2.5 MB) and indexes it. shapes.txt is skipped: the page draws no route lines. */
+  async function loadTimetable() {
+    const zip = new Uint8Array(await (await fetch(FEEDS.gtfs)).arrayBuffer());
+    const want = new Set(['routes.txt', 'trips.txt', 'stop_times.txt', 'stops.txt', 'calendar.txt', 'calendar_dates.txt']);
+    return new Gtfs(await unzip(zip, want));
+  }
+
+  const refresh = async () => ({
+    vehicles: parseVehicles(await feed(FEEDS.vehicles)),
+    live: parseTripUpdates(await feed(FEEDS.tripUpdates)),
+  });
+
+  /** Lowercase without accents, for searching stop names. */
+  const fold = (s) => s.toLowerCase().normalize('NFD').replace(/[̀-ͯ]/g, '');
+
+  return { FEEDS, GONE, Gtfs, Msg, delayAt, fold, loadTimetable, parseTripUpdates, parseVehicles, refresh, ymd };
+})();
+if (typeof module !== 'undefined') module.exports = TCAT;   // so site/selftest.mjs can run the same code
+</script>
+
+<script src="https://cdnjs.cloudflare.com/ajax/libs/leaflet/1.9.4/leaflet.js"></script>
+<script>
+(() => {
+  const { Gtfs, fold, loadTimetable, refresh } = TCAT;
+  const $ = (id) => document.getElementById(id);
+  const dark = () => document.documentElement.dataset.theme === 'dark'
+    || (!document.documentElement.dataset.theme && matchMedia('(prefers-color-scheme: dark)').matches);
+
+  let gtfs = null, vehicles = [], live = new Map(), liveTime = 0, offline = false;
+  let station = null, filter = new Set(), busy = false;
+
+  // --- map ---
+  const map = L.map('map', { zoomControl: true, attributionControl: true }).setView([48.2973, 4.0744], 13);
+  L.tileLayer('https://tile.openstreetmap.org/{z}/{x}/{y}.png', {
+    maxZoom: 19, attribution: '© les contributeurs d\'<a href="https://www.openstreetmap.org/copyright">OpenStreetMap</a>',
+  }).addTo(map);
+  const paintTiles = () => $('map').classList.toggle('dark', dark());
+  paintTiles();
+  matchMedia('(prefers-color-scheme: dark)').addEventListener('change', paintTiles);
+
+  const buses = L.layerGroup().addTo(map);
+  const stops = L.layerGroup().addTo(map);
+  const markers = new Map();
+
+  function busIcon(route, bearing) {
+    const size = 26;
+    const a = (bearing || 0) * Math.PI / 180;
+    const nx = Math.round(Math.sin(a) * size * 0.52), ny = Math.round(-Math.cos(a) * size * 0.52);
+    return L.divIcon({
+      className: '',
+      iconSize: [size, size],
+      iconAnchor: [size / 2, size / 2],
+      html: `<div class="bus" style="width:${size}px;height:${size}px;background:${route ? route.color : '#1f6fb2'};color:${route ? route.text : '#fff'}">`
+        + `${route ? route.short : '?'}<i style="--nx:${nx}px;--ny:${ny}px"></i></div>`,
+    });
+  }
+
+  function drawBuses() {
+    const seen = new Set();
+    for (const v of vehicles) {
+      if (!v.lat || !v.lon) continue;
+      if (filter.size && !filter.has(v.route)) continue;
+      const route = gtfs && gtfs.routes.get(v.route);
+      if (gtfs && !route) continue;   // MASQUE and unknown lines, as in the app
+      seen.add(v.id);
+      const at = [v.lat, v.lon];
+      let m = markers.get(v.id);
+      if (m) {
+        m.setLatLng(at);
+        m.setIcon(busIcon(route, v.bearing));
+      } else {
+        m = L.marker(at, { icon: busIcon(route, v.bearing), keyboard: false }).addTo(buses);
+        markers.set(v.id, m);
+      }
+      const trip = gtfs && gtfs.trips.get(v.trip);
+      const speed = v.speed ? ` · ${Math.round(v.speed * 3.6)} km/h` : '';
+      m.bindPopup(`<b>${route ? route.short : v.route}</b> ${trip ? esc(trip.terminus) : ''}<br>`
+        + `<span style="color:var(--muted)">Bus ${esc(v.label || v.id)}${speed}</span>`);
+    }
+    for (const [id, m] of markers) {
+      if (seen.has(id)) continue;
+      buses.removeLayer(m);
+      markers.delete(id);
+    }
+  }
+
+  function drawStops() {
+    stops.clearLayers();
+    if (!gtfs || map.getZoom() < 15) return;
+    const view = map.getBounds();
+    for (const s of gtfs.stations.values()) {
+      if (!view.contains([s.lat, s.lon])) continue;
+      L.marker([s.lat, s.lon], {
+        icon: L.divIcon({ className: '', iconSize: [9, 9], iconAnchor: [4.5, 4.5], html: '<div class="stopdot"></div>' }),
+        title: s.name,
+      }).addTo(stops).on('click', () => select(s.id));
+    }
+  }
+  map.on('moveend zoomend', drawStops);
+
+  // --- panel ---
+  const esc = (s) => String(s).replace(/[&<>"]/g, (c) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;' }[c]));
+  const badge = (r, big) => `<span class="badge${big ? ' big' : ''}" style="background:${r.color};color:${r.text}">${esc(r.short)}</span>`;
+  const clock = (epoch) => new Date(epoch * 1000).toLocaleTimeString('fr-FR', { hour: '2-digit', minute: '2-digit' });
+
+  /** "à l'arrêt", "3 min", or the clock time after an hour — the app's wording. */
+  function until(epoch) {
+    const s = epoch - Math.floor(Date.now() / 1000);
+    if (s < 60) return 'à l\'arrêt';
+    if (s < 3600) return `${Math.floor(s / 60)} min`;
+    return clock(epoch);
+  }
+
+  function delayText(delay) {
+    if (delay == null) return null;
+    const m = Math.round(delay / 60);
+    const cls = m >= 3 ? 'late' : m < 0 ? 'early' : 'rt';
+    return `<span class="${cls}">${m === 0 ? 'à l\'heure' : (m > 0 ? `+${m} min` : `${m} min`)}</span>`;
+  }
+
+  const LIVE_ICON = '<svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.4" stroke-linecap="round" aria-label="temps réel">'
+    + '<path d="M4.9 19.1a10 10 0 0 1 0-14.2M19.1 4.9a10 10 0 0 1 0 14.2M7.8 16.2a6 6 0 0 1 0-8.4M16.2 7.8a6 6 0 0 1 0 8.4"/><circle cx="12" cy="12" r="1.6" fill="currentColor"/></svg>';
+
+  function statusText() {
+    if (!gtfs) return 'Téléchargement des horaires…';
+    if (!liveTime) return offline ? 'Temps réel indisponible' : 'Connexion au temps réel…';
+    const age = Math.floor(Date.now() / 1000) - liveTime;
+    const when = age < 60 ? `il y a ${age} s` : `il y a ${Math.floor(age / 60)} min`;
+    const count = `${vehicles.length} bus en ligne`;
+    return offline ? `Hors ligne · màj ${when}` : `Temps réel · ${when} · ${count}`;
+  }
+
+  function drawStatus() {
+    $('statustext').textContent = statusText();
+    $('status').classList.toggle('off', offline || !liveTime);
+  }
+
+  function drawChips() {
+    if (!gtfs) return;
+    const running = new Set(vehicles.map((v) => v.route));
+    const lines = [...gtfs.routes.values()].filter((r) => running.has(r.id) || filter.has(r.id));
+    $('chips').hidden = lines.length === 0;
+    $('chips').innerHTML = lines.map((r) => `<button type="button" data-line="${esc(r.id)}" aria-pressed="${filter.has(r.id)}">`
+      + `<span class="pip" style="background:${r.color}"></span>${esc(r.short)}</button>`).join('');
+  }
+
+  $('chips').addEventListener('click', (e) => {
+    const b = e.target.closest('button[data-line]');
+    if (!b) return;
+    const id = b.dataset.line;
+    if (filter.has(id)) filter.delete(id); else filter.add(id);
+    drawChips();
+    buses.clearLayers();
+    markers.clear();
+    drawBuses();
+  });
+
+  function drawList() {
+    const list = $('list');
+    if (!gtfs) {
+      list.innerHTML = '<p class="note">La page télécharge les horaires TCAT (2,5 Mo) puis suit les bus en direct, '
+        + 'comme l\'application. <b>Choisissez un arrêt</b> pour voir ses prochains bus.</p>';
+      return;
+    }
+    $('valid').textContent = `Horaires valables du ${fr(gtfs.validFrom)} au ${fr(gtfs.validTo)}. `;
+    if (station) return drawDepartures(list);
+
+    const q = fold($('search').value.trim());
+    const found = [...gtfs.stations.values()]
+      .filter((s) => (q ? fold(s.name).includes(q) : true))
+      .sort((a, b) => a.name.localeCompare(b.name, 'fr'))
+      .slice(0, q ? 60 : 40);
+    list.innerHTML = `<p class="eyebrow">${q ? `${found.length} arrêt(s)` : 'Tous les arrêts'}</p>`
+      + found.map((s) => `<button class="row" type="button" data-station="${esc(s.id)}">`
+        + `<span class="grow"><span class="name">${esc(s.name)}</span>`
+        + `<span class="badges">${gtfs.stationRoutes(s.id).map((r) => badge(r)).join('')}</span></span></button>`).join('');
+  }
+
+  function drawDepartures(list) {
+    const s = gtfs.stations.get(station);
+    if (!s) { station = null; return drawList(); }
+    const deps = gtfs.departures(station, new Date(), live, { count: 12 });
+    const onTrip = new Set(vehicles.map((v) => v.trip));
+    list.innerHTML = '<button id="back" type="button">← Tous les arrêts</button>'
+      + `<h2>${esc(s.name)}</h2>`
+      + `<p class="eyebrow">${deps.length ? 'Prochains bus' : ''}</p>`
+      + (deps.length ? deps.map((d) => {
+        const late = delayText(d.delay);
+        return `<div class="row" data-trip="${esc(d.trip)}">${badge(d.route, true)}`
+          + `<span class="grow"><span class="name">${esc(d.terminus)}</span><span class="sub">`
+          + (onTrip.has(d.trip) ? '🚌 ' : '')
+          + (d.delay != null ? `prévu ${clock(d.scheduled)}` : 'horaire théorique')
+          + (late ? ` · ${late}` : '') + '</span></span>'
+          + `<span class="when">${d.delay != null ? LIVE_ICON : ''}${until(d.time)}</span></div>`;
+      }).join('')
+        : '<p class="note">Aucun bus dans les 4 prochaines heures.'
+          + (gtfs.expired ? ' <b>Les horaires téléchargés ont expiré :</b> rechargez la page.' : '') + '</p>');
+    $('back').onclick = () => { station = null; save(null); drawList(); };
+  }
+
+  const fr = (d) => (d && d.length === 8 ? `${d.slice(6)}/${d.slice(4, 6)}/${d.slice(0, 4)}` : '?');
+
+  function select(id) {
+    station = id;
+    save(id);
+    drawList();
+    const s = gtfs.stations.get(id);
+    if (s && !map.getBounds().contains([s.lat, s.lon])) map.setView([s.lat, s.lon], Math.max(map.getZoom(), 15));
+  }
+
+  const save = (id) => { try { id ? localStorage.setItem('station', id) : localStorage.removeItem('station'); } catch { /* private window */ } };
+  const saved = () => { try { return localStorage.getItem('station'); } catch { return null; } };
+
+  $('list').addEventListener('click', (e) => {
+    const row = e.target.closest('[data-station]');
+    if (row) select(row.dataset.station);
+  });
+  $('search').addEventListener('input', () => { station = null; drawList(); });
+  $('reload').addEventListener('click', () => poll(true));
+
+  // --- polling: every 15 s while the page is visible, as the app does ---
+  async function poll(manual) {
+    if (busy) return;
+    busy = true;
+    if (manual) { $('reload').disabled = true; }
+    try {
+      const r = await refresh();
+      vehicles = r.vehicles;
+      live = r.live;
+      liveTime = Math.floor(Date.now() / 1000);
+      offline = false;
+    } catch (e) {
+      offline = true;
+      console.warn('temps réel:', e);
+    } finally {
+      busy = false;
+      $('reload').disabled = false;
+    }
+    drawBuses();
+    drawChips();
+    drawStatus();
+    if (station) drawList();
+  }
+
+  setInterval(() => { if (!document.hidden) poll(); }, 15000);
+  setInterval(drawStatus, 5000);
+  document.addEventListener('visibilitychange', () => { if (!document.hidden) poll(); });
+
+  (async () => {
+    drawList();
+    poll();
+    try {
+      gtfs = await loadTimetable();
+    } catch (e) {
+      console.error(e);
+      $('list').innerHTML = '<p class="note"><b>Impossible de télécharger les horaires.</b> '
+        + `Vérifiez la connexion, puis rechargez la page.<br>${esc(e.message || e)}</p>`;
+      return;
+    }
+    station = saved();
+    drawList();
+    drawStops();
+    drawBuses();
+    drawChips();
+    drawStatus();
+  })();
+})();
+</script>
