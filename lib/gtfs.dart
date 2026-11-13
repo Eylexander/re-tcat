@@ -9,8 +9,9 @@ import 'package:sqlite3/sqlite3.dart';
 
 import 'realtime.dart';
 
-/// TCAT's GTFS timetable on transport.data.gouv.fr; always redirects to the current file. TCAT publishes a new one
-/// every couple of weeks, each valid for a few weeks only, so it is downloaded by the app instead of bundled.
+/// TCAT's GTFS timetable on transport.data.gouv.fr; this URL never changes and always serves the current file.
+/// TCAT publishes a new one every couple of weeks, each valid for a few weeks only, so it is downloaded by the app
+/// instead of bundled.
 const gtfsUrl = 'https://transport.data.gouv.fr/resources/79847/download';
 
 /// TCAT's internal routes (relief buses, workshop...).
@@ -109,8 +110,12 @@ class Gtfs {
   late final List<Row> calendar;
   final exceptions = <String, List<Row>>{};
 
-  /// The file the data came from (the redirect target of [gtfsUrl]) and its validity, as YYYYMMDD.
+  /// The version of the file the data came from ([currentGtfsSource]) and its validity, as YYYYMMDD.
   late final String source, validFrom, validTo;
+
+  /// No service day left: this timetable must be replaced even if the version check sees nothing new, or every stop
+  /// shows "aucun bus dans les 4 prochaines heures".
+  bool get expired => validTo.isNotEmpty && _ymd(DateTime.now()).compareTo(validTo) > 0;
 
   static Gtfs? open(String path) =>
       File(path).existsSync() ? Gtfs._(sqlite3.open(path, mode: OpenMode.readOnly)) : null;
@@ -280,22 +285,24 @@ class Gtfs {
 
 String _ymd(DateTime d) => '${d.year}${d.month.toString().padLeft(2, '0')}${d.day.toString().padLeft(2, '0')}';
 
-/// The file [gtfsUrl] currently redirects to, without downloading it.
+/// Which file [gtfsUrl] currently serves, without downloading it. transport.data.gouv.fr answers HEAD with the
+/// file's own headers (200, no Location: only GET redirects to the dated file), so the version is its ETag.
 Future<String> currentGtfsSource() async {
   final client = http.Client();
   try {
     final req = http.Request('HEAD', Uri.parse(gtfsUrl))..followRedirects = false;
     final res = await client.send(req).timeout(const Duration(seconds: 20));
-    return res.headers['location'] ?? gtfsUrl;
+    return res.headers['etag'] ?? res.headers['last-modified'] ?? res.headers['location'] ?? gtfsUrl;
   } finally {
     client.close();
   }
 }
 
-/// Downloads the timetable and imports it into [path] (written aside, then swapped in).
+/// Downloads the timetable and imports it into [path] (written aside, then swapped in). [source] is only recorded,
+/// to tell later whether TCAT has published a new file ([currentGtfsSource]).
 Future<void> downloadGtfs(String path, String source) async {
-  final res = await http.get(Uri.parse(source)).timeout(const Duration(minutes: 2));
-  if (res.statusCode != 200) throw http.ClientException('HTTP ${res.statusCode}', Uri.parse(source));
+  final res = await http.get(Uri.parse(gtfsUrl)).timeout(const Duration(minutes: 2));
+  if (res.statusCode != 200) throw http.ClientException('HTTP ${res.statusCode}', Uri.parse(gtfsUrl));
   final bytes = res.bodyBytes;
   await Isolate.run(() => importGtfs(bytes, path, source));
 }

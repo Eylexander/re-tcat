@@ -100,7 +100,7 @@ class Store extends ChangeNotifier {
     _lastGtfsCheck = now;
     try {
       final source = await currentGtfsSource();
-      if (!force && gtfs != null && gtfs!.source == source) return;
+      if (!force && gtfs != null && gtfs!.source == source && !gtfs!.expired) return;
       if (gtfs == null) {
         loading = 'Téléchargement des horaires…';
         loadError = null;

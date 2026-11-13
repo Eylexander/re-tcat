@@ -169,5 +169,21 @@ void main() {
     expect(g.departures('1:A', now, {}, direction: '1'), isEmpty);
     expect(g.lineStops('3').map((d) => d.terminus), ['BARBEREY', 'HOCHE']);
     expect(g.shape('SH'), hasLength(2));
+    expect(g.expired, isFalse);
+
+    // A timetable with no service day left must be replaced even when the version looks unchanged, or every stop
+    // shows "aucun bus dans les 4 prochaines heures" (Store.checkTimetable).
+    final stale = Archive();
+    for (final MapEntry(:key, :value) in files.entries) {
+      final dates = 'service_id,date,exception_type
+S,20200101,1
+';
+      stale.addFile(ArchiveFile.string(key, key == 'calendar_dates.txt' ? dates : value));
+    }
+    final stalePath = '${dir.path}/stale.db';
+    importGtfs(Uint8List.fromList(ZipEncoder().encode(stale)), stalePath, 'src');
+    final old = Gtfs.open(stalePath)!;
+    addTearDown(old.close);
+    expect(old.expired, isTrue);
   });
 }
